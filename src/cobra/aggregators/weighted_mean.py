@@ -2,8 +2,8 @@
 from __future__ import annotations
 import numpy as np
 
-from gradientcobra.aggregators.base import BaseAggregator
-from gradientcobra.factories.aggregator import AggregatorFactory
+from cobra.aggregators.base import BaseAggregator
+from cobra.factories.aggregator import AggregatorFactory
 
 @AggregatorFactory.register("weighted_mean", "mixcobra_mean")
 class WeightedMeanAggregator(BaseAggregator):

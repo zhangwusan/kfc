@@ -1,15 +1,15 @@
 
 from typing import Dict
 
-from gradientcobra.kernels.base import BaseKernel
-from gradientcobra.aggregators.base import BaseAggregator
-from gradientcobra.distances.base import BaseDistance
-from gradientcobra.estimators.base import BaseEstimator
+from cobra.kernels.base import BaseKernel
+from cobra.aggregators.base import BaseAggregator
+from cobra.distances.base import BaseDistance
+from cobra.estimators.base import BaseEstimator
 
-from gradientcobra.factories.aggregator import AggregatorFactory
-from gradientcobra.factories.distance import DistanceFactory
-from gradientcobra.factories.estimator import EstimatorFactory
-from gradientcobra.factories.kernel import KernelFactory
+from cobra.factories.aggregator import AggregatorFactory
+from cobra.factories.distance import DistanceFactory
+from cobra.factories.estimator import EstimatorFactory
+from cobra.factories.kernel import KernelFactory
 
 
 def resolve_from_estimators(estimators, estimators_params):

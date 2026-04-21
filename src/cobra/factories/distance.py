@@ -16,8 +16,8 @@ This design enables:
 from __future__ import annotations
 from typing import Dict
 
-from gradientcobra.distances.base import BaseDistance
-from gradientcobra.factories.base import BaseFactory
+from cobra.distances.base import BaseDistance
+from cobra.factories.base import BaseFactory
 
 
 class DistanceFactory(BaseFactory):

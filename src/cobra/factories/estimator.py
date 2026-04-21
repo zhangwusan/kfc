@@ -17,8 +17,8 @@ This design enables:
 from __future__ import annotations
 from typing import Dict
 
-from gradientcobra.estimators.base import BaseEstimator
-from gradientcobra.factories.base import BaseFactory
+from cobra.estimators.base import BaseEstimator
+from cobra.factories.base import BaseFactory
 
 
 class EstimatorFactory(BaseFactory):

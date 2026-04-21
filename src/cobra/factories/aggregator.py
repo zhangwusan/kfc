@@ -16,8 +16,8 @@ This design enables:
 from __future__ import annotations
 from typing import Dict
 
-from gradientcobra.aggregators.base import BaseAggregator
-from gradientcobra.factories.base import BaseFactory
+from cobra.aggregators.base import BaseAggregator
+from cobra.factories.base import BaseFactory
 
 
 class AggregatorFactory(BaseFactory):

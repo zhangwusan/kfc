@@ -2,8 +2,8 @@
 from collections import Counter
 import numpy as np
 
-from gradientcobra.aggregators.base import BaseAggregator
-from gradientcobra.factories.aggregator import AggregatorFactory
+from cobra.aggregators.base import BaseAggregator
+from cobra.factories.aggregator import AggregatorFactory
 
 
 

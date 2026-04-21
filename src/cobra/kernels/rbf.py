@@ -1,7 +1,7 @@
 import numpy as np
 
-from gradientcobra.factories.kernel import KernelFactory
-from gradientcobra.kernels.base import BaseKernel
+from cobra.factories.kernel import KernelFactory
+from cobra.kernels.base import BaseKernel
 
 
 @KernelFactory.register("rbf", "gaussian")

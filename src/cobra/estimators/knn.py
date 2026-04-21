@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 
 from sklearn.neighbors import KNeighborsRegressor
-from gradientcobra.estimators.base import BaseEstimator
-from gradientcobra.factories.estimator import EstimatorFactory
+from cobra.estimators.base import BaseEstimator
+from cobra.factories.estimator import EstimatorFactory
 
 @EstimatorFactory.register("knn", "nearest_neighbors")
 class KNNEstimator(BaseEstimator):

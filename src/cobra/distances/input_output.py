@@ -2,8 +2,8 @@
 from __future__ import annotations
 import numpy as np
 
-from gradientcobra.distances.base import BaseDistance
-from gradientcobra.factories.distance import DistanceFactory
+from cobra.distances.base import BaseDistance
+from cobra.factories.distance import DistanceFactory
 
 
 @DistanceFactory.register("joint", "input_output")

@@ -17,8 +17,8 @@ This design enables:
 from __future__ import annotations
 from typing import Dict
 
-from gradientcobra.factories.base import BaseFactory
-from gradientcobra.kernels.base import BaseKernel
+from cobra.factories.base import BaseFactory
+from cobra.kernels.base import BaseKernel
 
 
 class KernelFactory(BaseFactory):
