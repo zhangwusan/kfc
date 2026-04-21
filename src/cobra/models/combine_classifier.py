@@ -8,9 +8,10 @@ Pipeline:
 from typing import List, Union, Dict
 
 import numpy as np
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator as SklearnBaseEstimator
 
 from cobra.core.prediction_vector import PredictionVectorizer
+from cobra.estimators.base import BaseEstimator
 
 from cobra.utils.resolve import (
     resolve_from_aggregator,
@@ -20,7 +21,7 @@ from cobra.utils.resolve import (
 )
 
 
-class CombineClassifier(BaseEstimator):
+class CombineClassifier(SklearnBaseEstimator):
     """
     Combine Classifier (COBRA-style hard voting model)
 
