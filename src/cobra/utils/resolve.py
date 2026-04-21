@@ -1,15 +1,10 @@
 
 from typing import Dict
 
-from cobra.kernels.base import BaseKernel
-from cobra.aggregators.base import BaseAggregator
-from cobra.distances.base import BaseDistance
-from cobra.estimators.base import BaseEstimator
-
-from cobra.factories.aggregator import AggregatorFactory
-from cobra.factories.distance import DistanceFactory
-from cobra.factories.estimator import EstimatorFactory
-from cobra.factories.kernel import KernelFactory
+from cobra.kernels.base import BaseKernel, KernelFactory
+from cobra.aggregators.base import BaseAggregator, AggregatorFactory
+from cobra.distances.base import BaseDistance, DistanceFactory
+from cobra.estimators.base import BaseEstimator, EstimatorFactory
 
 
 def resolve_from_estimators(estimators, estimators_params):

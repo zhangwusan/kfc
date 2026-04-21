@@ -1,8 +1,6 @@
 from __future__ import annotations
 from sklearn.linear_model import LogisticRegression
-from cobra.estimators.base import BaseEstimator
-from cobra.factories.estimator import EstimatorFactory
-
+from cobra.estimators.base import BaseEstimator, EstimatorFactory
 @EstimatorFactory.register("logistic_regression", "logreg")
 class LogisticRegressionEstimator(BaseEstimator):
     def __init__(self, max_iter=2000, **kwargs):

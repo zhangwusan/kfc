@@ -1,9 +1,7 @@
 from __future__ import annotations
 from sklearn.tree import DecisionTreeClassifier
 
-from cobra.estimators.base import BaseEstimator
-from cobra.factories.estimator import EstimatorFactory
-
+from cobra.estimators.base import BaseEstimator, EstimatorFactory
 @EstimatorFactory.register("decision_tree", "tree")
 class DecisionTreeEstimator(BaseEstimator):
     def __init__(self, max_depth=5, **kwargs):

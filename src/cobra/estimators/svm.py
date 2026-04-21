@@ -4,9 +4,7 @@ from __future__ import annotations
 import numpy as np
 from sklearn.svm import SVR
 
-from cobra.estimators.base import BaseEstimator
-from cobra.factories.estimator import EstimatorFactory
-
+from cobra.estimators.base import BaseEstimator, EstimatorFactory
 @EstimatorFactory.register("svm", "svr", "support_vector")
 class SVMEstimator(BaseEstimator):
     """

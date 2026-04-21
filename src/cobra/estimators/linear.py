@@ -3,9 +3,7 @@ from __future__ import annotations
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-from cobra.estimators.base import BaseEstimator
-from cobra.factories.estimator import EstimatorFactory
-
+from cobra.estimators.base import BaseEstimator, EstimatorFactory
 
 @EstimatorFactory.register("linear_regression", "linear", "ols")
 class LinearRegressionEstimator(BaseEstimator):

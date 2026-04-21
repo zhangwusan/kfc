@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from cobra.estimators.base import BaseEstimator
-from cobra.factories.estimator import EstimatorFactory
-
+from cobra.estimators.base import BaseEstimator, EstimatorFactory
 
 @EstimatorFactory.register("random_regressor", "noise")
 class RandomRegressor(BaseEstimator):

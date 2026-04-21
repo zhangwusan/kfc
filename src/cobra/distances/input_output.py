@@ -2,9 +2,7 @@
 from __future__ import annotations
 import numpy as np
 
-from cobra.distances.base import BaseDistance
-from cobra.factories.distance import DistanceFactory
-
+from cobra.distances.base import BaseDistance, DistanceFactory
 
 @DistanceFactory.register("joint", "input_output")
 class JointDistance(BaseDistance):

@@ -1,8 +1,6 @@
 import numpy as np
 
-from cobra.estimators.base import BaseEstimator
-from cobra.factories.estimator import EstimatorFactory
-
+from cobra.estimators.base import BaseEstimator, EstimatorFactory
 @EstimatorFactory.register("majority", "dummy_classifier")
 class MajorityEstimator(BaseEstimator):
     """

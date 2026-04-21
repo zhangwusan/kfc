@@ -4,9 +4,7 @@ from __future__ import annotations
 import numpy as np
 from sklearn.tree import DecisionTreeRegressor
 
-from cobra.estimators.base import BaseEstimator
-from cobra.factories.estimator import EstimatorFactory
-
+from cobra.estimators.base import BaseEstimator, EstimatorFactory
 
 @EstimatorFactory.register("tree", "decision_tree")
 class TreeEstimator(BaseEstimator):

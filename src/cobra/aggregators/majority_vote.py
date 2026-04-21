@@ -2,11 +2,7 @@
 from collections import Counter
 import numpy as np
 
-from cobra.aggregators.base import BaseAggregator
-from cobra.factories.aggregator import AggregatorFactory
-
-
-
+from cobra.aggregators.base import BaseAggregator, AggregatorFactory
 @AggregatorFactory.register("majority_vote", "cobra_vote")
 class MajorityVoteAggregator(BaseAggregator):
     """

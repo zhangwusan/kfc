@@ -1,8 +1,7 @@
 from __future__ import annotations
 import numpy as np
 
-from cobra.factories.kernel import KernelFactory
-from cobra.kernels.base import BaseKernel
+from cobra.kernels.base import BaseKernel, KernelFactory
 
 @KernelFactory.register("indicator", "cobra_kernel")
 class IndicatorKernel(BaseKernel):
