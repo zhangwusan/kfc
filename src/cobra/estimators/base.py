@@ -25,7 +25,7 @@ from abc import ABC, abstractmethod
 from typing import Dict
 import numpy as np
 
-from cobra.factories.base import BaseFactory
+from cobra.core.factory import BaseFactory
 
 
 class BaseEstimator(ABC):
