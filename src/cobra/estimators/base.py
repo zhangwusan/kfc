@@ -22,7 +22,10 @@ This design ensures compatibility across all aggregation strategies.
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from typing import Dict
 import numpy as np
+
+from cobra.factories.base import BaseFactory
 
 
 class BaseEstimator(ABC):
@@ -113,3 +116,16 @@ class BaseEstimator(ABC):
             - (n_samples, M) for multi-output / ensemble space
         """
         pass
+
+
+class EstimatorFactory(BaseFactory):
+    """
+    Factory for managing estimator components.
+
+    This class inherits all functionality from BaseFactory:
+    - register() decorator for adding estimators
+    - create() for instantiating estimators by name
+    - available() for listing registered estimators
+    """
+
+    _registry: Dict[str, BaseEstimator] = {}

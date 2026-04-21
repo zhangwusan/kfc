@@ -4,6 +4,9 @@ Defines interface for all distance functions used in COBRA-style models.
 """
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from typing import Dict
+
+from cobra.core.factory import BaseFactory
 
 
 class BaseDistance(ABC):
@@ -28,3 +31,15 @@ class BaseDistance(ABC):
     @abstractmethod
     def compute(self, *args, **kwargs):
         pass
+
+class DistanceFactory(BaseFactory):
+    """
+    Factory for managing distance components.
+
+    This class inherits all functionality from BaseFactory:
+    - register() decorator for adding distances
+    - create() for instantiating distances by name
+    - available() for listing registered distances
+    """
+
+    _registry: Dict[str, BaseDistance] = {}
