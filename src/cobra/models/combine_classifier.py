@@ -11,6 +11,7 @@ import numpy as np
 from sklearn.base import BaseEstimator
 
 from cobra.core.prediction_vector import PredictionVectorizer
+
 from cobra.utils.resolve import (
     resolve_from_aggregator,
     resolve_from_distance,

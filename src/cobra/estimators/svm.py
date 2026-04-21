@@ -8,7 +8,7 @@ from cobra.estimators.base import BaseEstimator
 from cobra.factories.estimator import EstimatorFactory
 
 @EstimatorFactory.register("svm", "svr", "support_vector")
-class SVREstimator(BaseEstimator):
+class SVMEstimator(BaseEstimator):
     """
     Support Vector Regression with RBF kernel.
     """
