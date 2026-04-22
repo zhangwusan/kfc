@@ -1,54 +1,43 @@
+"""
+CombineClassifier
+"""
 
 from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Any
+from abc import ABC
+from typing import Any, Dict, List, Union
 
 import numpy as np
-from sklearn.base import BaseEstimator, ClassifierMixin, clone
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.svm import SVC
-from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.base import BaseEstimator as SkBaseEstimator
+from sklearn.utils import check_X_y, check_array
+from sklearn.utils.validation import check_is_fitted
 
-from cobra.core import AggregatorFactory, DistanceFactory, KernelFactory, SplitterFactory
-
-
-@dataclass
-class _ClassifierSpec:
-    """Container describing classifier aliases and concrete estimators."""
-
-    name: str
-    estimator: Any
+from cobra.core.aggregators.base import AggregatorFactory, BaseAggregator
+from cobra.core.distances.base import BaseDistance, DistanceFactory
+from cobra.core.estimators.base import BaseEstimator, EstimatorFactory
+from cobra.core.kernels.base import BaseKernel, KernelFactory
+from cobra.core.spaces.base import BaseSpaceProjector, SpaceProjectorFactory
+from cobra.core.splitters.base import SplitterFactory
 
 
-class CombineClassifier(BaseEstimator, ClassifierMixin):
-    """Mojirsheibani-style COBRA classifier with hard consensus matching.
-
-    Pipeline
-    --------
-    1. Split data into estimator-training and aggregation subsets.
-    2. Fit base classifiers on the training subset.
-    3. Build prediction vectors on the aggregation subset.
-    4. For a new point, keep only exact vector matches (via Hamming + Indicator).
-    5. Aggregate kept labels by majority vote.
-    """
+class CombineClassifier(ABC, SkBaseEstimator):
 
     def __init__(
         self,
-        estimators: list[Any] | None = None,
+        estimators: List[Union[str, BaseEstimator]] | None = None,
+        estimators_params: Dict[str, Any] | None = None,
         splitter: str = "holdout",
-        splitter_params: dict[str, Any] | None = None,
+        splitter_params: Dict[str, Any] | None = None,
         distance: str = "hamming",
-        distance_params: dict[str, Any] | None = None,
+        distance_params: Dict[str, Any] | None = None,
         kernel: str = "indicator",
-        kernel_params: dict[str, Any] | None = None,
+        kernel_params: Dict[str, Any] | None = None,
         aggregator: str = "majority_vote",
-        aggregator_params: dict[str, Any] | None = None,
+        aggregator_params: Dict[str, Any] | None = None,
         random_state: int | None = None,
     ):
+    
         self.estimators = estimators
+        self.estimators_params = estimators_params
         self.splitter = splitter
         self.splitter_params = splitter_params
         self.distance = distance
@@ -59,91 +48,156 @@ class CombineClassifier(BaseEstimator, ClassifierMixin):
         self.aggregator_params = aggregator_params
         self.random_state = random_state
 
-    def _default_estimators(self) -> list[_ClassifierSpec]:
-        """Provide a diverse default classifier pool for consensus."""
-        return [
-            _ClassifierSpec("logistic_regression", LogisticRegression(max_iter=2000, random_state=self.random_state)),
-            _ClassifierSpec("random_forest", RandomForestClassifier(n_estimators=300, random_state=self.random_state)),
-            _ClassifierSpec("svm", SVC(kernel="rbf", C=1.0, gamma="scale", random_state=self.random_state)),
-            _ClassifierSpec("knn", KNeighborsClassifier(n_neighbors=7)),
+    def _resolve_fit_split_context(self, X, y, X_l, y_l):
+        """
+        Returns: X_k, y_k, X_l, y_l, iloc_k, iloc_l, as_predictions
+            X_k, y_k: training set for base estimators
+            X_l, y_l: aggregation set for COBRA
+            iloc_k, iloc_l: indices of X_k, X_l in original X
+        """
+        X, y = check_X_y(X, y)
+        if X_l is not None and y_l is not None:
+            X_l, y_l = check_X_y(X_l, y_l)
+            X_k_, X_l_ = X, X_l
+            y_k_, y_l_ = y, y_l
+            iloc_l, iloc_k = np.arange(len(y_l_)), np.arange(len(y))
+            self.as_predictions_ = False
+        else:
+            splitter = SplitterFactory.create(
+                self.splitter,
+                **(self.splitter_params or {})
+            )
+            iloc_k, iloc_l = splitter.split(X, y)
+            X_k_, y_k_ = X[iloc_k], y[iloc_k]
+            X_l_, y_l_ = X[iloc_l], y[iloc_l]
+            self.as_predictions_ = True
+        
+        return X_k_, y_k_, X_l_, y_l_, iloc_k, iloc_l
+
+    def _fit_estimators(self, X_k: np.ndarray, y_k: np.ndarray):
+        """
+        Build and fit base estimators.
+        """
+
+        default_estimators = [
+            "logistic_regression",
+            "random_forest",
+            "svm",
+            "knn",
         ]
 
-    def _resolve_estimators(self) -> list[Any]:
-        """Resolve estimator list from aliases or sklearn-compatible instances."""
-        alias_map = {spec.name: spec.estimator for spec in self._default_estimators()}
+        estimators = self.estimators or default_estimators
 
-        if self.estimators is None:
-            return [clone(est) for est in alias_map.values()]
+        machines = []
 
-        resolved: list[Any] = []
-        for item in self.estimators:
-            if isinstance(item, str):
-                key = item.lower()
-                if key not in alias_map:
-                    raise KeyError(
-                        f"Unknown estimator alias '{item}'. "
-                        f"Available aliases: {sorted(alias_map.keys())}."
-                    )
-                resolved.append(clone(alias_map[key]))
+        for est in estimators:
+
+            if isinstance(est, str):
+                params = self.estimators_params.get(est, {})
+                model = EstimatorFactory.create(est, **params)
+
+            elif isinstance(est, BaseEstimator):
+                model = est
+
             else:
-                resolved.append(clone(item))
-        return resolved
+                raise ValueError(
+                    f"Invalid estimator: {type(est)}. "
+                    f"Expected str or BaseEstimator. "
+                    f"Available: {EstimatorFactory.available()}"
+                )
 
-    def _prediction_matrix(self, x: np.ndarray, estimators: list[Any]) -> np.ndarray:
-        """Build a matrix with one column per base classifier prediction."""
-        cols = [np.asarray(model.predict(x)).reshape(-1, 1) for model in estimators]
+            model.fit(X_k, y_k)
+            machines.append(model)
+        
+        return machines
+    
+    def _prediction_matrix(self, X: np.ndarray):
+        if self.as_predictions_:
+            return X
+        
+        cols = []
+        for est in self.base_estimators_:
+            cols.append(np.asarray(est.predict(X)).reshape(-1, 1))
         return np.hstack(cols)
+    
+    def _space_projector(self, X, pred_matrix):
+        projector : BaseSpaceProjector = SpaceProjectorFactory.create("combine_classifier")
+        return projector.transform(X, pred_matrix)
 
-    def fit(self, x: np.ndarray, y: np.ndarray) -> "CombineClassifier":
-        """Fit classifier pool and cache the aggregation subset representation."""
-        x, y = check_X_y(x, y)
-        self.classes_ = np.unique(y)
+    def fit(
+        self,
+        X : np.ndarray,
+        y : np.ndarray,
+        X_l: np.ndarray | None = None,
+        y_l: np.ndarray | None = None,
+    ):
+        
+        # Resolve fit context
+        (
+            self.X_k_, self.y_k_,
+            self.X_l_, self.y_l_,
+            self.iloc_k_, self.iloc_l_,
+        ) = self._resolve_fit_split_context(X, y, X_l, y_l)
 
-        split_params = dict(self.splitter_params or {})
-        split_params.setdefault("random_state", self.random_state)
-        splitter = SplitterFactory.create(self.splitter, **split_params)
-        idx_train, idx_agg = splitter.split(x, y)
+        self.classes_ = np.unique(self.y_k_)
 
-        self.x_train_, self.y_train_ = x[idx_train], y[idx_train]
-        self.x_agg_, self.y_agg_ = x[idx_agg], y[idx_agg]
-        self.global_majority_class_ = self.classes_[np.argmax(np.bincount(np.searchsorted(self.classes_, self.y_agg_)))]
+        if not self.as_predictions_:
+            self.base_estimators_ = self._fit_estimators(self.X_k_, self.y_k_)
+            pred_l = self._prediction_matrix(self.X_l_)
+            self.z_l_ = self._space_projector(self.X_l_, pred_l)
+        else:
+            self.z_l_ = self.X_l_
+        
+        # create distance, kernel, aggregator
+        self.distance_ : BaseDistance = DistanceFactory.create(
+            self.distance,
+            **(self.distance_params or {})
+        )
 
-        self.base_estimators_ = self._resolve_estimators()
-        for model in self.base_estimators_:
-            model.fit(self.x_train_, self.y_train_)
+        self.kernel_ : BaseKernel = KernelFactory.create(
+            self.kernel,
+            **(self.kernel_params or {})
+        )
 
-        self.pred_agg_ = self._prediction_matrix(self.x_agg_, self.base_estimators_)
+        self.aggregator_ : BaseAggregator = AggregatorFactory.create(
+            self.aggregator,
+            **(self.aggregator_params or {})
+        )
 
-        distance_params = dict(self.distance_params or {})
-        kernel_params = dict(self.kernel_params or {})
-        aggregator_params = dict(self.aggregator_params or {})
+        self.global_majority_class_ = np.bincount(
+            self.y_k_.astype(int)
+        ).argmax()
 
-        self.distance_ = DistanceFactory.create(self.distance, **distance_params)
-        self.kernel_ = KernelFactory.create(self.kernel, **kernel_params)
-        self.aggregator_ = AggregatorFactory.create(self.aggregator, **aggregator_params)
         return self
 
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        """Predict labels using exact consensus matches in prediction space."""
-        check_is_fitted(self, ["base_estimators_", "pred_agg_", "distance_", "kernel_", "aggregator_"])
-        x = check_array(x)
+    def predict(self, X):
+        check_is_fitted(self, ["z_l_", "distance_", "kernel_"])
 
-        pred_mat = self._prediction_matrix(x, self.base_estimators_)
-        outputs: list[Any] = []
+        X = check_array(X)
 
-        for row in pred_mat:
-            distances = self.distance_.pairwise(row.reshape(1, -1), self.pred_agg_)
-            weights = np.asarray(self.kernel_(distances), dtype=float)
-            mask = weights > 0.0
+        pred_x = self._prediction_matrix(X)
+        z_x = self._space_projector(X, pred_x)
+
+        outputs = []
+
+        for row in z_x:
+            d = self.distance_.pairwise(row, self.z_l_)
+            w = self.kernel_(d)
+
+            mask = w > 0
 
             if not np.any(mask):
                 outputs.append(self.global_majority_class_)
                 continue
 
-            y_subset = self.y_agg_[mask]
-            w_subset = weights[mask]
-            pred = self.aggregator_.aggregate(y_subset, w_subset)
-            outputs.append(pred)
+            y_sub = self.y_l_[mask]
+            w_sub = w[mask]
 
-        out = np.asarray(outputs)
-        return out.astype(self.classes_.dtype, copy=False)
+            outputs.append(
+                self.aggregator_.aggregate(y_sub, w_sub)
+            )
+
+        return np.asarray(outputs)
+
+
+        

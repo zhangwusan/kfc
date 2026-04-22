@@ -17,6 +17,15 @@ def _to_2d(arr: ArrayLike) -> np.ndarray:
         raise ValueError("Expected 1D or 2D input.")
     return out
 
+@SpaceProjectorFactory.register("combine_classifier")
+class CombineClassifierSpaceProjector(BaseSpaceProjector):
+    """
+    COBRA space:
+    purely prediction space geometry.
+    """
+
+    def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
+        return _to_2d(model_outputs)
 
 @SpaceProjectorFactory.register("gradientcobra", "prediction_only")
 class PredictionOnlyProjector(BaseSpaceProjector):
