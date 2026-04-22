@@ -10,6 +10,8 @@ from .builtin import (
     KNNRegressorEstimator,
     RandomForestRegressorEstimator,
     SVMRegressorEstimator,
+    DecisionTreeRegressorEstimator,
+    GradientBoostingRegressorEstimator,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
 	"KNNRegressorEstimator",
 	"RandomForestRegressorEstimator",
 	"SVMRegressorEstimator",
+	"DecisionTreeRegressorEstimator",
+	"GradientBoostingRegressorEstimator",
 ]
