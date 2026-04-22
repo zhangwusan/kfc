@@ -193,7 +193,7 @@ class LogisticRegressionEstimator(SklearnEstimator):
             LogisticRegression(max_iter=max_iter, random_state=random_state)
         )
     
-@EstimatorFactory.register("desicion_tree")
+@EstimatorFactory.register("decision_tree")
 class DecisionTreeRegressorEstimator(SklearnEstimator):
     """
     Decision Tree regression.
