@@ -201,9 +201,14 @@ class GradientCOBRA(BaseEstimator, RegressorMixin):
 			self.x_agg_, self.y_agg_ = None, y
 			self.pred_agg_ = np.asarray(X, dtype=float)
 		else:
-			self.splitter_params['random_state'] = self.random_state
-			self.splitter_params['split'] = split
-			self.splitter_params['overlap'] = overlap
+			self.splitter_params = dict(self.splitter_params or {})
+			if self.splitter == "overlap":
+				self.splitter_params = {
+					**(self.splitter_params or {}),
+					"split": float(split),
+					"overlap": float(overlap),
+					"random_state": self.random_state,
+				}
 			splitter = SplitterFactory.create(self.splitter, **self.splitter_params)
 			idx_train, idx_agg = splitter.split(X, y)
 			self.x_train_, self.y_train_ = X[idx_train], y[idx_train]

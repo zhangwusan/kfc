@@ -116,7 +116,6 @@ class CombineClassifier(BaseEstimator, ClassifierMixin):
 
         distance_params = dict(self.distance_params or {})
         kernel_params = dict(self.kernel_params or {})
-        kernel_params.setdefault("epsilon", 0.0)
         aggregator_params = dict(self.aggregator_params or {})
 
         self.distance_ = DistanceFactory.create(self.distance, **distance_params)

@@ -33,7 +33,7 @@ class _RegressorSpec:
 	estimator: Any
 
 
-class MixCOBRA(BaseEstimator, RegressorMixin):
+class MixCOBRARegressor(BaseEstimator, RegressorMixin):
 	"""MixCOBRA with joint input-output space and two smoothing parameters.
 
 	The method mixes geometric closeness in input space and agreement in
