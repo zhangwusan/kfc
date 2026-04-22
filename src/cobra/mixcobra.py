@@ -187,7 +187,7 @@ class MixCOBRARegressor(BaseEstimator, RegressorMixin):
 		split: float = 0.5,
 		overlap: float = 0.0,
 		one_parameter: bool = False,
-	) -> "MixCOBRA":
+	):
 		"""Fit model and optimize input-output trade-off parameters.
 
 		- If `X_l`/`y_l` are provided, `X`/`y` are used for base estimators and
@@ -214,24 +214,19 @@ class MixCOBRARegressor(BaseEstimator, RegressorMixin):
 				raise ValueError("pred_features rows must match the number of aggregation targets.")
 			self.as_predictions_ = True
 		else:
-			if overlap > 0.0:
-				x_k, y_k, x_l, y_l, _, _ = data_split_overlap(
-					X,
-					y,
-					split=split,
-					overlap=overlap,
-					shuffle=True,
-					random_state=self.random_state,
-				)
-				self.x_train_, self.y_train_ = x_k, y_k
-				self.x_agg_, self.y_agg_ = x_l, y_l
-			else:
-				split_params = dict(self.splitter_params or {})
-				split_params.setdefault("random_state", self.random_state)
-				splitter = SplitterFactory.create(self.splitter, **split_params)
-				idx_train, idx_agg = splitter.split(X, y)
-				self.x_train_, self.y_train_ = X[idx_train], y[idx_train]
-				self.x_agg_, self.y_agg_ = X[idx_agg], y[idx_agg]
+			self.splitter_params = dict(self.splitter_params or {})
+			if self.splitter == "overlap":
+				self.splitter_params = {
+					"split": float(split),
+					"overlap": float(overlap),
+					**(dict(self.splitter_params or {})),
+				}
+			params = dict(self.splitter_params or {})
+			params.setdefault("random_state", self.random_state)
+			splitter = SplitterFactory.create(self.splitter, **params)
+			idx_train, idx_agg = splitter.split(X, y)
+			self.x_train_, self.y_train_ = X[idx_train], y[idx_train]
+			self.x_agg_, self.y_agg_ = X[idx_agg], y[idx_agg]
 			self.as_predictions_ = False
 
 		if not self.as_predictions_:

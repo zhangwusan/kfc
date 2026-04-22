@@ -2,11 +2,24 @@
 
 from .base import BaseEstimator
 from .base import EstimatorFactory
-from .builtin import MeanRegressor, SklearnRegressor
+from .builtin import (
+    MeanRegressor,
+    LinearRegressorEstimator,
+    RidgeRegressorEstimator,
+    LassoRegressorEstimator,
+    KNNRegressorEstimator,
+    RandomForestRegressorEstimator,
+    SVMRegressorEstimator,
+)
 
 __all__ = [
 	"BaseEstimator",
 	"EstimatorFactory",
-	"SklearnRegressor",
 	"MeanRegressor",
+	"LinearRegressorEstimator",
+	"RidgeRegressorEstimator",
+	"LassoRegressorEstimator",
+	"KNNRegressorEstimator",
+	"RandomForestRegressorEstimator",
+	"SVMRegressorEstimator",
 ]
