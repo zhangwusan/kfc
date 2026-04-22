@@ -228,22 +228,23 @@ class GradientCOBRA(BaseEstimator, RegressorMixin):
 
             self.x_train_, self.y_train_ = X, y
             self.x_agg_, self.y_agg_ = X_l, y_l
-
+            self.as_predictions_ = False
+            
         elif self.as_predictions_:
             self.x_train_, self.y_train_ = None, None
             self.x_agg_, self.y_agg_ = None, y
             self.pred_agg_ = X.astype(float)
-
+            self.as_predictions_ = True
+            
         else:
             splitter = resolve_from_splitter(
                 self.splitter,
                 self.splitter_params,
             )
-
             idx_train, idx_agg = splitter.split(X, y)
-
             self.x_train_, self.y_train_ = X[idx_train], y[idx_train]
             self.x_agg_, self.y_agg_ = X[idx_agg], y[idx_agg]
+            self.as_predictions_ = False
 
         # ---- Train estimators ----
         if not self.as_predictions_:

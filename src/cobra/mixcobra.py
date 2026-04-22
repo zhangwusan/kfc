@@ -16,13 +16,11 @@ from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from cobra.core import (
 	AggregatorFactory,
 	DistanceFactory,
-	EstimatorFactory,
 	KernelFactory,
 	LossFactory,
 	SpaceProjectorFactory,
-	SplitterFactory,
 )
-from cobra.utils.preprocessing import data_split_overlap
+from cobra.utils.resolve import resolve_from_estimators, resolve_from_splitter
 
 
 @dataclass
@@ -43,6 +41,7 @@ class MixCOBRARegressor(BaseEstimator, RegressorMixin):
 	def __init__(
 		self,
 		estimators: list[Any] | None = None,
+		estimators_params: dict[str, Any] | None = None,
 		splitter: str = "holdout",
 		splitter_params: dict[str, Any] | None = None,
 		projector: str = "tradeoff",
@@ -77,40 +76,6 @@ class MixCOBRARegressor(BaseEstimator, RegressorMixin):
 		self.beta_grid = beta_grid
 		self.one_parameter = one_parameter
 		self.random_state = random_state
-
-	def _default_estimators(self) -> list[_RegressorSpec]:
-		"""Return default machine pool used in MixCOBRA papers."""
-		return [
-			_RegressorSpec("linear", LinearRegression()),
-			_RegressorSpec("ridge", Ridge(alpha=1.0, random_state=self.random_state)),
-			_RegressorSpec("lasso", Lasso(alpha=0.005, random_state=self.random_state)),
-			_RegressorSpec("knn", KNeighborsRegressor(n_neighbors=7)),
-			_RegressorSpec("random_forest", RandomForestRegressor(n_estimators=250, random_state=self.random_state)),
-			_RegressorSpec("svm", SVR(C=5.0, epsilon=0.05, kernel="rbf")),
-		]
-
-	def _resolve_estimators(self) -> list[Any]:
-		"""Resolve estimator list from aliases, core wrappers, or sklearn instances."""
-		defaults = {spec.name: spec.estimator for spec in self._default_estimators()}
-		if self.estimators is None:
-			return [clone(est) for est in defaults.values()]
-
-		resolved: list[Any] = []
-		for item in self.estimators:
-			if isinstance(item, str):
-				key = item.lower()
-				if EstimatorFactory.contains(key):
-					resolved.append(EstimatorFactory.create(key))
-				elif key in defaults:
-					resolved.append(clone(defaults[key]))
-				else:
-					raise KeyError(
-						f"Unknown estimator alias '{item}'. "
-						f"Available aliases: {sorted(set(defaults) | set(EstimatorFactory.available()))}."
-					)
-			else:
-				resolved.append(clone(item))
-		return resolved
 
 	def _predict_matrix(self, x: np.ndarray, estimators: list[Any]) -> np.ndarray:
 		"""Stack each estimator prediction as a column."""
@@ -214,25 +179,29 @@ class MixCOBRARegressor(BaseEstimator, RegressorMixin):
 				raise ValueError("pred_features rows must match the number of aggregation targets.")
 			self.as_predictions_ = True
 		else:
-			self.splitter_params = dict(self.splitter_params or {})
-			if self.splitter == "overlap":
-				self.splitter_params = {
-					"split": float(split),
-					"overlap": float(overlap),
-					**(dict(self.splitter_params or {})),
-				}
-			params = dict(self.splitter_params or {})
-			params.setdefault("random_state", self.random_state)
-			splitter = SplitterFactory.create(self.splitter, **params)
+			splitter = resolve_from_splitter(self.splitter, self.splitter_params)
 			idx_train, idx_agg = splitter.split(X, y)
 			self.x_train_, self.y_train_ = X[idx_train], y[idx_train]
 			self.x_agg_, self.y_agg_ = X[idx_agg], y[idx_agg]
 			self.as_predictions_ = False
 
 		if not self.as_predictions_:
-			self.base_estimators_ = self._resolve_estimators()
+			self.base_estimators_ = resolve_from_estimators(
+				self.estimators,
+				self.estimators_params,
+				default_estimators=[
+                    "linear",
+                    "ridge",
+                    "lasso",
+                    "knn",
+                    "random_forest",
+                    "svm",
+                ],
+			)
+
 			for est in self.base_estimators_:
 				est.fit(self.x_train_, self.y_train_)
+
 			self.pred_agg_ = self._predict_matrix(self.x_agg_, self.base_estimators_)
 
 		self.distance_ = DistanceFactory.create(self.distance, **dict(self.distance_params or {}))
