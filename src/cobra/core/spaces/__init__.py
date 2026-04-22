@@ -2,11 +2,12 @@
 
 from .base import BaseSpaceProjector
 from .base import SpaceProjectorFactory
-from .builtin import IdentityProjector, JointInputOutputProjector
+from .builtin import DiscreteProjector, PredictionProjector, TradeOffProjector
 
 __all__ = [
 	"BaseSpaceProjector",
 	"SpaceProjectorFactory",
-	"IdentityProjector",
-	"JointInputOutputProjector",
+	"DiscreteProjector",
+	"TradeOffProjector",
+	"PredictionProjector",
 ]
