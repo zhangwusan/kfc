@@ -1,6 +1,0 @@
-from cobra.aggregators.base import BaseAggregator
-from cobra.aggregators.majority_vote import MajorityVoteAggregator
-from cobra.aggregators.kernel_regression import KernelRegressionAggregator
-from cobra.aggregators.softmax_vote import SoftmaxVoteAggregator
-from cobra.aggregators.weighted_mean import WeightedMeanAggregator
-

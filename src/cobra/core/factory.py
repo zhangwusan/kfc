@@ -54,6 +54,11 @@ class BaseFactory(ABC):
 
     _registry: Dict[str, Any] = {}
 
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Ensure each concrete factory subclass owns an isolated registry."""
+        super().__init_subclass__(**kwargs)
+        cls._registry = {}
+
     @classmethod
     def register(cls, *names: str):
         """
