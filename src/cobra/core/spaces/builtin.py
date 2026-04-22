@@ -18,32 +18,34 @@ def _to_2d(arr: ArrayLike) -> np.ndarray:
     return out
 
 
-@SpaceProjectorFactory.register("discrete", "prediction_space")
-class DiscreteProjector(BaseSpaceProjector):
-    """Use only model outputs as the consensus-space coordinates."""
+@SpaceProjectorFactory.register("gradientcobra", "prediction_only")
+class PredictionOnlyProjector(BaseSpaceProjector):
+    """
+    GradientCOBRA space:
+    purely prediction space geometry.
+    """
 
     def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
-        _ = x
         return _to_2d(model_outputs)
 
-
-@SpaceProjectorFactory.register("tradeoff", "mixcobra")
-class TradeOffProjector(BaseSpaceProjector):
-    """Concatenate input features and outputs with an adjustable trade-off."""
-
+@SpaceProjectorFactory.register("mixcobra", "tradeoff")
+class MixCOBRASpaceProjector(BaseSpaceProjector):
+    """
+    MixCOBRA joint space:
+    combines input + prediction geometry.
+    """
     def __init__(self, alpha: float = 1.0, beta: float = 1.0) -> None:
         self.alpha = float(alpha)
         self.beta = float(beta)
 
     def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
-        x2d = _to_2d(x)
-        y2d = _to_2d(model_outputs)
-        if x2d.shape[0] != y2d.shape[0]:
-            raise ValueError("x and model_outputs must have the same number of rows.")
-        return np.hstack([x2d * self.alpha, y2d * self.beta])
+        x = _to_2d(x)
+        y = _to_2d(model_outputs)
 
-@SpaceProjectorFactory.register("prediction")
-class PredictionProjector(BaseSpaceProjector):
-    def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
-        _ = x
-        return _to_2d(model_outputs)
+        if x.shape[0] != y.shape[0]:
+            raise ValueError("x and model_outputs must match rows")
+
+        return np.hstack([
+            self.alpha * x,
+            self.beta * y
+        ])

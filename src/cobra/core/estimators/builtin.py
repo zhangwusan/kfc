@@ -21,7 +21,7 @@ import numpy as np
 from sklearn.base import BaseEstimator as SkBaseEstimator
 
 from sklearn.dummy import DummyRegressor
-from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge, Lasso
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.svm import SVR
@@ -161,3 +161,18 @@ class SVMRegressorEstimator(SklearnEstimator):
 
     def __init__(self, C: float = 5.0, epsilon: float = 0.05) -> None:
         super().__init__(SVR(C=C, epsilon=epsilon, kernel="rbf"))
+
+@EstimatorFactory.register("logistic_regression")
+class LogisticRegressionEstimator(SklearnEstimator):
+    """
+    Logistic Regression for regression tasks.
+
+    Although primarily a classifier, it can be used in regression settings
+    by treating the output as a continuous score.
+    """
+
+    def __init__(self, max_iter: int = 2000, random_state: Optional[int] = None) -> None:
+        super().__init__(
+            LogisticRegression(max_iter=max_iter, random_state=random_state)
+        )
+    

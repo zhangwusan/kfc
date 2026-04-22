@@ -60,6 +60,7 @@ class MixCOBRARegressor(BaseEstimator, RegressorMixin):
 		random_state: int | None = None,
 	) -> None:
 		self.estimators = estimators
+		self.estimators_params = estimators_params
 		self.splitter = splitter
 		self.splitter_params = splitter_params
 		self.projector = projector
