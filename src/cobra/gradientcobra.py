@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from abc import ABC
+from typing import Any, List, Union
 import numpy as np
 
-from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.base import RegressorMixin, BaseEstimator as SkBaseEstimator
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 
 from cobra.core import (
@@ -11,250 +12,209 @@ from cobra.core import (
     DistanceFactory,
     KernelFactory,
 )
+from cobra.core.estimators.base import BaseEstimator, EstimatorFactory
 from cobra.core.optimizers.base import OptimizerFactory
-from cobra.core.spaces.base import SpaceProjectorFactory
-from cobra.utils.resolve import (
-    resolve_from_estimators,
-    resolve_from_splitter,
-    resolve_from_distance,
-    resolve_from_aggregator,
-    resolve_from_loss,
-    resolve_from_optimizer,
-)
+from cobra.core.spaces.base import BaseSpaceProjector, SpaceProjectorFactory
+from cobra.core.splitters.base import SplitterFactory
 
 
-class GradientCOBRA(BaseEstimator, RegressorMixin):
+class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
     """
-    GradientCOBRA with explicit projection space.
-
-    Key idea:
-        Z = projector(X, prediction_matrix(X))
-
-    All geometry is defined in Z-space.
+    GradientCOBRA
     """
 
     def __init__(
         self,
-        estimators: list[Any] | None = None,
+        estimators: List[Union[str, BaseEstimator]] | None = None,
         estimators_params: dict[str, Any] | None = None,
-        splitter: str = "holdout",
-        splitter_params: dict[str, Any] | None = None,
         distance: str = "euclidean",
         distance_params: dict[str, Any] | None = None,
         kernel: str = "rbf",
         kernel_params: dict[str, Any] | None = None,
         aggregator: str = "weighted_mean",
         aggregator_params: dict[str, Any] | None = None,
+        splitter: str = "holdout",
+        splitter_params: dict[str, Any] | None = None,
         loss: str = "mse",
         loss_params: dict[str, Any] | None = None,
-        optimizer: str = "grid",
+        optimizer: str = "grad",
         optimizer_params: dict[str, Any] | None = None,
-        projector: str = "prediction_only",
-        projector_params: dict[str, Any] | None = None,
-        bandwidth_grid: np.ndarray | None = None,
-        initial_bandwidth: float = 1.0,
-        random_state: int | None = None,
+
+        bandwidth_list: np.ndarray | None = None,
+        random_state: int | None = None
     ):
         self.estimators = estimators
-        self.estimators_params = estimators_params or {}
-
-        self.splitter = splitter
-        self.splitter_params = splitter_params or {}
-
+        self.estimators_params = estimators_params
         self.distance = distance
-        self.distance_params = distance_params or {}
-
+        self.distance_params = distance_params
         self.kernel = kernel
-        self.kernel_params = kernel_params or {}
-
+        self.kernel_params = kernel_params
         self.aggregator = aggregator
-        self.aggregator_params = aggregator_params or {}
-
+        self.aggregator_params = aggregator_params
+        self.splitter = splitter
+        self.splitter_params = splitter_params
         self.loss = loss
-        self.loss_params = loss_params or {}
-
+        self.loss_params = loss_params
         self.optimizer = optimizer
-        self.optimizer_params = optimizer_params or {}
+        self.optimizer_params = optimizer_params
 
-        self.projector = projector
-        self.projector_params = projector_params or {}
-
-        self.bandwidth_grid = bandwidth_grid
-        self.initial_bandwidth = float(initial_bandwidth)
-
+        self.bandwidth_list = bandwidth_list
         self.random_state = random_state
 
-    # ------------------------------------------------------------
-    # Prediction matrix
-    # ------------------------------------------------------------
-    def _predict_matrix(self, X: np.ndarray, estimators: list[Any]) -> np.ndarray:
-        return np.column_stack([
-            est.predict(X).astype(float)
-            for est in estimators
-        ])
-
-    # ------------------------------------------------------------
-    # Projector space
-    # ------------------------------------------------------------
-    def _project(self, X: np.ndarray, pred: np.ndarray) -> np.ndarray:
-        projector = SpaceProjectorFactory.create(
-            self.projector,
-            **self.projector_params
-        )
-        return projector.transform(X, pred)
-
-    # ------------------------------------------------------------
-    # Kernel resolution
-    # ------------------------------------------------------------
-    def _resolve_kernel(self, bandwidth: float):
-        params = dict(self.kernel_params)
-
-        if self.kernel in {"indicator", "hard"}:
-            params["epsilon"] = float(bandwidth)
+    def _resolve_fit_split_context(self, X, y, X_l, y_l):
+        """
+        Returns: X_k, y_k, X_l, y_l, iloc_k, iloc_l, as_predictions
+            X_k, y_k: training set for base estimators
+            X_l, y_l: aggregation set for COBRA
+            iloc_k, iloc_l: indices of X_k, X_l in original X
+        """
+        X, y = check_X_y(X, y)
+        if X_l is not None and y_l is not None:
+            X_l, y_l = check_X_y(X_l, y_l)
+            X_k_, X_l_ = X, X_l
+            y_k_, y_l_ = y, y_l
+            iloc_l, iloc_k = np.arange(len(y_l_)), np.arange(len(y))
+            self.as_predictions_ = True
         else:
-            params["bandwidth"] = float(bandwidth)
+            split_params = dict(self.splitter_params or {})
+            split_params.setdefault("random_state", self.random_state)
+            splitter_cls = SplitterFactory.get(self.splitter)
+            splitter = splitter_cls(**split_params)
+            iloc_k, iloc_l = splitter.split(X=X, y=y)
+            X_k_, y_k_ = X[iloc_k], y[iloc_k]
+            X_l_, y_l_ = X[iloc_l], y[iloc_l]
+            self.as_predictions_ = False
 
-        return KernelFactory.create(self.kernel, **params)
+        return X_k_, y_k_, X_l_, y_l_, iloc_k, iloc_l
 
-    # ------------------------------------------------------------
-    # Leave-one-out error
-    # ------------------------------------------------------------
-    def _leave_one_out_error(self, bandwidth: float) -> float:
-        kernel = self._resolve_kernel(bandwidth)
+    def _fit_estimators(self, X_k: np.ndarray, y_k: np.ndarray):
+        """
+        Build and fit base estimators.
+        """
 
-        n = self.z_agg_.shape[0]
-        preds = np.empty(n, dtype=float)
+        default_estimators = [
+            "linear",
+            "ridge",
+            "lasso",
+            "knn",
+            "random_forest",
+            "svm",
+        ]
 
-        for i in range(n):
-            d = self.distance_.pairwise(self.z_agg_[i], self.z_agg_)
-            w = np.asarray(kernel(d), dtype=float)
+        estimators = self.estimators or default_estimators
 
-            w[i] = 0.0
+        machines = []
 
-            if np.allclose(w.sum(), 0.0):
-                preds[i] = float(np.mean(self.y_agg_))
+        for est in estimators:
+            if isinstance(est, str):
+                params = (self.estimators_params or {}).get(est, {})
+                model = EstimatorFactory.create(est, **params)
+            elif isinstance(est, BaseEstimator):
+                model = est
             else:
-                preds[i] = float(self.aggregator_.aggregate(self.y_agg_, w))
+                raise ValueError(
+                    f"Invalid estimator: {type(est)}. "
+                    f"Expected str or BaseEstimator. "
+                    f"Available: {EstimatorFactory.available()}"
+                )
 
-        return float(self.loss_(self.y_agg_, preds))
-
-    # ------------------------------------------------------------
-    # Optimization
-    # ------------------------------------------------------------
-    def _optimize_bandwidth(self) -> float:
-        if self.optimizer == "grid" and self.bandwidth_grid is not None:
-            grid = np.asarray(self.bandwidth_grid, dtype=float)
-            scores = np.array([self._leave_one_out_error(v) for v in grid])
-
-            best = float(grid[np.argmin(scores)])
-
-            self.optimization_outputs_ = {
-                "method": "grid",
-                "bandwidth": best,
-                "risk": float(np.min(scores)),
-            }
-            return best
-
-        optimizer = OptimizerFactory.create(
-            self.optimizer,
-            **self.optimizer_params
-        )
-
-        best = float(
-            optimizer.optimize(self._leave_one_out_error, self.initial_bandwidth)
-        )
-
-        self.optimization_outputs_ = {
-            "method": self.optimizer,
-            "bandwidth": best,
-            "risk": float(self._leave_one_out_error(best)),
-        }
-
-        return best
-
-    # ------------------------------------------------------------
-    # Fit
-    # ------------------------------------------------------------
-    def fit(self, X: np.ndarray, y: np.ndarray) -> "GradientCOBRA":
-        X, y = check_X_y(X, y, y_numeric=True)
-        y = np.asarray(y, dtype=float)
-
-        # ---- split ----
-        splitter = resolve_from_splitter(
-            self.splitter,
-            self.splitter_params,
-        )
-        idx_train, idx_agg = splitter.split(X, y)
-
-        self.x_train_, self.y_train_ = X[idx_train], y[idx_train]
-        self.x_agg_, self.y_agg_ = X[idx_agg], y[idx_agg]
-
-        # ---- models ----
-        self.base_estimators_ = resolve_from_estimators(
-            self.estimators,
-            self.estimators_params,
-            default_estimators=[
-                "linear",
-                "ridge",
-                "lasso",
-                "knn",
-                "random_forest",
-                "svm",
-            ],
-        )
-
+            model.fit(X_k, y_k)
+            machines.append(model)
+        
+        return machines
+    
+    def _space_projector(self, X, pred_matrix):
+        projector : BaseSpaceProjector = SpaceProjectorFactory.create("gradientcobra")
+        return projector.transform(X, pred_matrix)
+    
+    def _prediction_matrix(self, X: np.ndarray):
+        if self.as_predictions_:
+            return X
+        
+        cols = []
         for est in self.base_estimators_:
-            est.fit(self.x_train_, self.y_train_)
+            preds = est.predict(X)
+            cols.append(preds)
+        
+        return np.column_stack(cols)
+    
+    def fit(
+        self,
+        X : np.ndarray,
+        y : np.ndarray,
+        X_l : np.ndarray | None = None,
+        y_l : np.ndarray | None = None
+    ):
+        """
+        Fit GradientCOBRA model.
 
-        # ---- prediction matrix ----
-        raw_pred = self._predict_matrix(self.x_agg_, self.base_estimators_)
+        Parameters:
+            X, y: data to split into training/aggregation sets
+            X_l, y_l: optional pre-split aggregation set (bypasses splitting)
+        
+        Returns:
+            self
+        """
+        (
+            self.X_k_, self.y_k_,
+            self.X_l_, self.y_l_,
+            self.iloc_k_, self.iloc_l_
+        ) = self._resolve_fit_split_context(X, y, X_l, y_l)
 
-        # ---- PROJECTOR SPACE (NEW CORE FIX) ----
-        self.z_agg_ = self._project(self.x_agg_, raw_pred)
+        self._fit_estimators(self.X_k_, self.y_k_)
 
-        # ---- components ----
+        if not self.as_predictions_:
+            pred_l = self._prediction_matrix(self.X_l_)
+            self.z_l_ = self._space_projector(self.X_l_, pred_l)
+        else:
+            self.z_l_ = self.X_l_
+
+        # resolve component
         self.distance_ = DistanceFactory.create(
             self.distance,
-            **self.distance_params or {}
+            **(self.distance_params or {})
+        )
+
+        self.kernel_ = KernelFactory.create(
+            self.kernel,
+            **(self.kernel_params or {})
         )
 
         self.aggregator_ = AggregatorFactory.create(
             self.aggregator,
-            **self.aggregator_params or {}
+            **(self.aggregator_params or {})
         )
 
-        self.loss_ = resolve_from_loss(
+        self.optimizer_ = OptimizerFactory.create(
+            self.optimizer,
+            **(self.optimizer_params or {})
+        )
+
+        self.loss_ = self.optimizer_.get_loss(
             self.loss,
-            self.loss_params,
+            **(self.loss_params or {})
         )
 
-        # ---- optimize ----
-        self.opt_bandwidth_ = self._optimize_bandwidth()
-        self.kernel_ = self._resolve_kernel(self.opt_bandwidth_)
-
+        # optimize hyperparameters
         return self
 
-    # ------------------------------------------------------------
-    # Predict
-    # ------------------------------------------------------------
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        check_is_fitted(self, ["z_agg_", "distance_", "kernel_", "aggregator_"])
-
+    def predict(self, X):
+        """
+        Prediction
+        """
+        check_is_fitted(self, ["z_l_", "distance_", "kernel_", "aggregator_"])
         X = check_array(X)
+        pred_x = self._prediction_matrix(X)
 
-        raw_pred = self._predict_matrix(X, self.base_estimators_)
-        z_x = self._project(X, raw_pred)
+        z_x = self._space_projector(X, pred_x)
 
         outputs = np.empty(z_x.shape[0], dtype=float)
 
-        kernel = self._resolve_kernel(self.opt_bandwidth_)
-
         for i, row in enumerate(z_x):
-            d = self.distance_.pairwise(row, self.z_agg_)
-            w = np.asarray(kernel(d), dtype=float)
+            d = self.distance_.pairwise(row, self.z_l_)
+            w = self.kernel_(d)
 
-            outputs[i] = float(
-                self.aggregator_.aggregate(self.y_agg_, w)
-            )
+            outputs[i] = self.aggregator_.aggregate(self.y_l_, w)
 
         return outputs
+        
