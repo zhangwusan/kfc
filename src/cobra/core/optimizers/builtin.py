@@ -24,14 +24,14 @@ class GridSearchOptimizer(BaseOptimizer):
         scores = [objective(float(v)) for v in candidates]
         return float(candidates[int(np.argmin(scores))])
 
-@OptimizerFactory.register("gradient", "gradient_descent")
+@OptimizerFactory.register("grad", "gradient", "gradient_descent")
 class GradientDescentOptimizer(BaseOptimizer):
     """Finite-difference gradient descent with tqdm progress display."""
 
     def __init__(
         self,
         lr: float = 0.05,
-        max_iter: int = 200,
+        max_iter: int = 50,
         eps: float = 1e-5,
         verbose: bool = True
     ) -> None:
@@ -68,7 +68,8 @@ class GradientDescentOptimizer(BaseOptimizer):
             pbar.set_postfix(
                 x=f"{x:.4f}",
                 score=f"{score:.4f}",
-                best=f"{best_score:.4f}"
+                best=f"{best_score:.4f}",
+                grad=f"{grad:.4f}"
             )
 
         return best_x

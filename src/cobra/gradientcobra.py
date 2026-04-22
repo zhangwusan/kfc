@@ -12,10 +12,14 @@ from cobra.core import (
     DistanceFactory,
     KernelFactory,
 )
+from cobra.core.aggregators.base import BaseAggregator
+from cobra.core.distances.base import BaseDistance
 from cobra.core.estimators.base import BaseEstimator, EstimatorFactory
-from cobra.core.optimizers.base import OptimizerFactory
+from cobra.core.kernels.base import BaseKernel
+from cobra.core.losses.base import BaseLoss, LossFactory
+from cobra.core.optimizers.base import BaseOptimizer, OptimizerFactory
 from cobra.core.spaces.base import BaseSpaceProjector, SpaceProjectorFactory
-from cobra.core.splitters.base import SplitterFactory
+from cobra.core.splitters.base import BaseDataSplitter, SplitterFactory
 
 
 class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
@@ -78,9 +82,11 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         else:
             split_params = dict(self.splitter_params or {})
             split_params.setdefault("random_state", self.random_state)
-            splitter_cls = SplitterFactory.get(self.splitter)
-            splitter = splitter_cls(**split_params)
-            iloc_k, iloc_l = splitter.split(X=X, y=y)
+            splitter: BaseDataSplitter = SplitterFactory.create(
+                self.splitter,
+                **split_params
+            )
+            iloc_k, iloc_l = splitter.split(X, y)
             X_k_, y_k_ = X[iloc_k], y[iloc_k]
             X_l_, y_l_ = X[iloc_l], y[iloc_l]
             self.as_predictions_ = False
@@ -132,11 +138,39 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             return X
         
         cols = []
-        for est in self.base_estimators_:
+        for est in self.estimators_:
             preds = est.predict(X)
             cols.append(preds)
         
         return np.column_stack(cols)
+    
+    def _optimize_hyperparameters(self):
+        def objective(bandwidth):
+            # update kernel with current bandwidth
+            self.kernel_.update_params(bandwidth=bandwidth)
+
+            n_samples = self.z_l_.shape[0]
+            preds = np.empty(n_samples, dtype=float)
+
+            for i in range(n_samples):
+                d = self.distance_.pairwise(self.z_l_[i], self.z_l_)
+                w = self.kernel_(d)
+
+                w[i] = 0.0
+                if np.allclose(w.sum(), 0.0):
+                    preds[i] = float(np.mean(self.y_l_))
+                else:
+                    preds[i] = self.aggregator_.aggregate(self.y_l_, w)
+            
+            return self.loss_(self.y_l_, preds)
+
+        best = self.optimizer_.optimize(objective=objective, initial_value=1.0)
+
+        self.optimization_outputs_ = {
+            "method": self.optimizer,
+            "bandwidth": best,
+            "risk" : objective(best)
+        }
     
     def fit(
         self,
@@ -161,7 +195,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             self.iloc_k_, self.iloc_l_
         ) = self._resolve_fit_split_context(X, y, X_l, y_l)
 
-        self._fit_estimators(self.X_k_, self.y_k_)
+        self.estimators_ = self._fit_estimators(self.X_k_, self.y_k_)
 
         if not self.as_predictions_:
             pred_l = self._prediction_matrix(self.X_l_)
@@ -170,32 +204,33 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             self.z_l_ = self.X_l_
 
         # resolve component
-        self.distance_ = DistanceFactory.create(
+        self.distance_ : BaseDistance = DistanceFactory.create(
             self.distance,
             **(self.distance_params or {})
         )
 
-        self.kernel_ = KernelFactory.create(
+        self.kernel_ : BaseKernel = KernelFactory.create(
             self.kernel,
             **(self.kernel_params or {})
         )
 
-        self.aggregator_ = AggregatorFactory.create(
+        self.aggregator_ : BaseAggregator = AggregatorFactory.create(
             self.aggregator,
             **(self.aggregator_params or {})
         )
 
-        self.optimizer_ = OptimizerFactory.create(
-            self.optimizer,
-            **(self.optimizer_params or {})
-        )
-
-        self.loss_ = self.optimizer_.get_loss(
+        self.loss_ : BaseLoss = LossFactory.create(
             self.loss,
             **(self.loss_params or {})
         )
 
+        self.optimizer_ : BaseOptimizer = OptimizerFactory.create(
+            self.optimizer,
+            **(self.optimizer_params or {})
+        )
+
         # optimize hyperparameters
+        self._optimize_hyperparameters()
         return self
 
     def predict(self, X):
