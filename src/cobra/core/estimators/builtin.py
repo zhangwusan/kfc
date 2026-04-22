@@ -23,8 +23,9 @@ from sklearn.base import BaseEstimator as SkBaseEstimator
 from sklearn.dummy import DummyRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge, Lasso
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
 
 from .base import BaseEstimator, EstimatorFactory
 
@@ -72,6 +73,22 @@ class SklearnEstimator(BaseEstimator):
             Predicted values.
         """
         return np.asarray(self.estimator.predict(x), dtype=float)
+
+    def predict_proba(self, x: ArrayLike) -> np.ndarray:
+        """
+        Generate class probabilities if supported.
+
+        Returns
+        -------
+        np.ndarray
+            Predicted probabilities.
+        """
+        if hasattr(self.estimator, "predict_proba"):
+            return np.asarray(self.estimator.predict_proba(x), dtype=float)
+        else:
+            raise NotImplementedError(
+                f"{self.estimator.__class__.__name__} does not support predict_proba."
+            )
 
 @EstimatorFactory.register("mean_regressor", "dummy_mean")
 class MeanRegressor(BaseEstimator):
@@ -171,8 +188,43 @@ class LogisticRegressionEstimator(SklearnEstimator):
     by treating the output as a continuous score.
     """
 
-    def __init__(self, max_iter: int = 2000, random_state: Optional[int] = None) -> None:
+    def __init__(self, max_iter: int = 5000, random_state: Optional[int] = None) -> None:
         super().__init__(
             LogisticRegression(max_iter=max_iter, random_state=random_state)
         )
     
+@EstimatorFactory.register("desicion_tree")
+class DecisionTreeRegressorEstimator(SklearnEstimator):
+    """
+    Decision Tree regression.
+
+    Simple tree-based model that captures nonlinear relationships.
+    """
+
+    def __init__(self, max_depth: Optional[int] = None, random_state: Optional[int] = None) -> None:
+        super().__init__(
+            DecisionTreeRegressor(max_depth=max_depth, random_state=random_state)
+        )
+
+@EstimatorFactory.register("gradient_boosting")
+class GradientBoostingRegressorEstimator(SklearnEstimator):
+    """
+    Gradient Boosting regression.
+
+    Ensemble of weak learners (e.g., decision trees) trained sequentially.
+    """
+    def __init__(
+        self,
+        n_estimators: int = 100,
+        learning_rate: float = 0.1,
+        max_depth: Optional[int] = None,
+        random_state: Optional[int] = None,
+    ) -> None:
+        super().__init__(
+            GradientBoostingRegressor(
+                n_estimators=n_estimators,
+                learning_rate=learning_rate,
+                max_depth=max_depth,
+                random_state=random_state,
+            )
+        )

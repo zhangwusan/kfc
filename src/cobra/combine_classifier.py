@@ -7,7 +7,7 @@ from abc import ABC
 from typing import Any, Dict, List, Union
 
 import numpy as np
-from sklearn.base import BaseEstimator as SkBaseEstimator
+from sklearn.base import BaseEstimator as SkBaseEstimator, clone
 from sklearn.utils import check_X_y, check_array
 from sklearn.utils.validation import check_is_fitted
 
@@ -61,16 +61,18 @@ class CombineClassifier(ABC, SkBaseEstimator):
             X_k_, X_l_ = X, X_l
             y_k_, y_l_ = y, y_l
             iloc_l, iloc_k = np.arange(len(y_l_)), np.arange(len(y))
-            self.as_predictions_ = False
+            self.as_predictions_ = True
         else:
+            split_params = dict(self.splitter_params or {})
+            split_params.setdefault("random_state", self.random_state)
             splitter = SplitterFactory.create(
                 self.splitter,
-                **(self.splitter_params or {})
+                **split_params
             )
             iloc_k, iloc_l = splitter.split(X, y)
             X_k_, y_k_ = X[iloc_k], y[iloc_k]
             X_l_, y_l_ = X[iloc_l], y[iloc_l]
-            self.as_predictions_ = True
+            self.as_predictions_ = False
         
         return X_k_, y_k_, X_l_, y_l_, iloc_k, iloc_l
 
@@ -91,14 +93,11 @@ class CombineClassifier(ABC, SkBaseEstimator):
         machines = []
 
         for est in estimators:
-
             if isinstance(est, str):
-                params = self.estimators_params.get(est, {})
+                params = (self.estimators_params or {}).get(est, {})
                 model = EstimatorFactory.create(est, **params)
-
             elif isinstance(est, BaseEstimator):
                 model = est
-
             else:
                 raise ValueError(
                     f"Invalid estimator: {type(est)}. "
@@ -164,14 +163,13 @@ class CombineClassifier(ABC, SkBaseEstimator):
             **(self.aggregator_params or {})
         )
 
-        self.global_majority_class_ = np.bincount(
-            self.y_k_.astype(int)
-        ).argmax()
+        classes, counts = np.unique(self.y_k_, return_counts=True)
+        self.global_majority_class_ = classes[np.argmax(counts)]
 
         return self
 
     def predict(self, X):
-        check_is_fitted(self, ["z_l_", "distance_", "kernel_"])
+        check_is_fitted(self, ["z_l_", "distance_", "kernel_", "aggregator_"])
 
         X = check_array(X)
 
@@ -198,6 +196,3 @@ class CombineClassifier(ABC, SkBaseEstimator):
             )
 
         return np.asarray(outputs)
-
-
-        
