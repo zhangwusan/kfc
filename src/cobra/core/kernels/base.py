@@ -2,6 +2,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import numpy as np
 
+from cobra.core.factory import BaseFactory
+
 
 class BaseKernel(ABC):
     """
@@ -94,3 +96,9 @@ class BaseKernel(ABC):
             K: (n, n) kernel matrix
         """
         raise NotImplementedError
+
+class KernelFactory(BaseFactory):
+    """
+    Factory for creating kernel instances.
+    """
+    registry = {}
