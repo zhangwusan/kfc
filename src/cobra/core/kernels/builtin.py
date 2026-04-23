@@ -1,53 +1,61 @@
 """Concrete kernels for hard and soft consensus weighting."""
 
 from __future__ import annotations
-
 import numpy as np
-from numpy.typing import ArrayLike
 
 from .base import BaseKernel, KernelFactory
 
 
-def _as_1d(distances: ArrayLike) -> np.ndarray:
-    """Normalize distances to a flat float array."""
-    return np.asarray(distances, dtype=float).reshape(-1)
-
-
+# =========================
+# 1. Indicator (Hard COBRA)
+# =========================
 @KernelFactory.register("indicator", "hard")
 class IndicatorKernel(BaseKernel):
-    """Hard-threshold kernel used in classic COBRA variants."""
+    """
+    K(x, x') = 1(D < theta)
+    """
 
-    def __init__(self, epsilon: float = 0.5) -> None:
-        self.epsilon = float(epsilon)
+    def compute(self, D: np.ndarray) -> np.ndarray:
+        # D is already fused (n, n)
+        theta = getattr(self, "theta", None)
 
-    def __call__(self, distances: ArrayLike) -> np.ndarray:
-        d = _as_1d(distances)
-        return (d <= self.epsilon).astype(float)
+        if theta is None:
+            raise ValueError("theta must be provided for IndicatorKernel")
+
+        return (D < theta).astype(float)
 
 
+# =========================
+# 2. Gaussian / RBF
+# =========================
 @KernelFactory.register("rbf", "gaussian")
 class RBFKernel(BaseKernel):
-    """Gaussian radial basis kernel with bandwidth $h$."""
+    """
+    K = exp(-theta * D^2)
+    """
 
-    def __init__(self, bandwidth: float = 1.0) -> None:
-        if bandwidth <= 0:
-            raise ValueError("bandwidth must be strictly positive.")
-        self.bandwidth = float(bandwidth)
+    def compute(self, D: np.ndarray) -> np.ndarray:
+        theta = getattr(self, "theta", None)
 
-    def __call__(self, distances: ArrayLike) -> np.ndarray:
-        d = _as_1d(distances)
-        return np.exp(-(d ** 2) / self.bandwidth)
+        if theta is None:
+            raise ValueError("theta must be provided for RBFKernel")
+
+        return np.exp(-theta * (D ** 2))
 
 
+# =========================
+# 3. Laplace Kernel
+# =========================
 @KernelFactory.register("laplace")
 class LaplaceKernel(BaseKernel):
-    """Laplace kernel with heavier tails than Gaussian."""
+    """
+    K = exp(-theta * |D|)
+    """
 
-    def __init__(self, bandwidth: float = 1.0) -> None:
-        if bandwidth <= 0:
-            raise ValueError("bandwidth must be strictly positive.")
-        self.bandwidth = float(bandwidth)
+    def compute(self, D: np.ndarray) -> np.ndarray:
+        theta = getattr(self, "theta", None)
 
-    def __call__(self, distances: ArrayLike) -> np.ndarray:
-        d = _as_1d(distances)
-        return np.exp(-np.abs(d) / self.bandwidth)
+        if theta is None:
+            raise ValueError("theta must be provided for LaplaceKernel")
+
+        return np.exp(-theta * np.abs(D))
