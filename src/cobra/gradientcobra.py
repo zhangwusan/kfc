@@ -148,6 +148,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
     def _optimize_hyperparameters(self):
         def objective(params: np.ndarray) -> float:
             # update kernel with current bandwidth
+
             self.kernel_.update_params(bandwidth=params[0])
 
             n_samples = self.z_l_.shape[0]
@@ -165,12 +166,13 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             
             return self.loss_(self.y_l_, preds)
 
-        best = self.optimizer_.optimize(objective=objective, initial_value=[1.0])
+        best, histories = self.optimizer_.optimize(objective=objective, initial_value=[1.0])
 
         self.optimization_outputs_ = {
             "method": self.optimizer,
             "bandwidth": best,
-            "risk" : objective(best)
+            "risk" : objective(best),
+            "histories" : histories
         }
     
     def fit(

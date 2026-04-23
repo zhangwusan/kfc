@@ -65,7 +65,7 @@ class GridSearchOptimizer(BaseOptimizer):
         -------
         best_param : np.ndarray
         """
-
+        histories = []
         # --- infer dimension ---
         dim = len(np.atleast_1d(initial_value))
 
@@ -90,11 +90,16 @@ class GridSearchOptimizer(BaseOptimizer):
             if score < best_score:
                 best_score = score
                 best_x = x
+        
+            histories.append({
+                'x' : x,
+                'score' : score
+            })
 
         if best_x is None:
             raise RuntimeError("Grid search failed to find a valid parameter.")
 
-        return best_x
+        return best_x, histories
 
 
 # =========================================================
@@ -206,6 +211,8 @@ class GradientDescentOptimizer(BaseOptimizer):
         best_score = objective(x)
 
         schedule = self.schedules[self.speed]
+        
+        histories = []
 
         iterator = tqdm(
             range(self.max_iter),
@@ -240,5 +247,14 @@ class GradientDescentOptimizer(BaseOptimizer):
                     best=f"{best_score:.4f}",
                     grad=f"{np.linalg.norm(grad):.4f}"
                 )
+            
+            histories.append({
+                "iteration": t,
+                "x": x.copy(),
+                "score": score,
+                "best_score": best_score,
+                "gradient": grad
+            })
+        
 
-        return best_x
+        return best_x, histories

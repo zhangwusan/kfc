@@ -215,14 +215,14 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			return self.loss_(self.y_l_, preds)
 		
 		if self.one_parameter:
-			best = self.optimizer_.optimize(
+			best, histories = self.optimizer_.optimize(
 				objective,
 				initial_value=np.array([1.0])
 			)
 			alpha = float(best[0])
 			beta = 0.0
 		else:
-			best = self.optimizer_.optimize(
+			best, histories = self.optimizer_.optimize(
 				objective,
 				initial_value=np.array([1.0, 1.0])
 			)
@@ -233,6 +233,7 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			"alpha": alpha,
 			"beta": beta,
 			"risk": objective([alpha, beta] if not self.one_parameter else [alpha]),
+			"histories" : histories
 		}		
 
 
