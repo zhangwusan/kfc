@@ -201,12 +201,16 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			n = z_l.shape[0]
 			preds = np.empty(n)
 
+			D = np.array([
+				self.distance_.pairwise(z_l[i], z_l)
+				for i in range(n)
+			])  # (n, n)
+
+			K = self.kernel_(D)
+
+
 			for i in range(n):
-				d = self.distance_.pairwise(z_l[i], z_l)
-				w = self.kernel_(d)
-
-				w[i] = 0.0
-
+				w = K[i]
 				if np.allclose(w.sum(), 0.0):
 					preds[i] = np.mean(self.y_l_)
 				else:
@@ -259,7 +263,7 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			self.pred_l_ = self._prediction_matrix(self.X_l_)
 		
 		self.distance_ : BaseDistance = DistanceFactory.create(self.distance, **(self.distance_params or {}))
-		self.kernel_ : BaseKernel = KernelFactory.create(self.kernel, **(self.kernel_params or {}))
+		self.kernel_ : BaseKernel = KernelFactory.create(self.kernel, **(self.kernel_params or {"alpha" : np.asarray([1.0, 1.0])}))
 		self.aggregator_ : BaseAggregator = AggregatorFactory.create(self.aggregator, **(self.aggregator_params or {}))
 		self.loss_ : BaseLoss = LossFactory.create(self.loss, **(self.loss_params or {}))
 		self.optimizer_ : BaseOptimizer = OptimizerFactory.create(self.optimizer, **(self.optimizer_params or {}))
@@ -274,7 +278,7 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 	def predict(
 		self,
 		X: np.ndarray,
-		pred_X: np.ndarray,
+		pred_X: np.ndarray = Mone,
 		alpha: float | None = None,
 		beta: float | None = None,
 		bandwidth: float | None = None
@@ -298,11 +302,15 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		
 		outputs = np.empty(z_x.shape[0], dtype=float)
 
-		for i, row in enumerate(z_x):
-			d = self.distance_.pairwise(row, self.z_l_)
-			w = self.kernel_(d)
+		D = np.array([
+			self.distance_.pairwise(z_x[i], self.z_l_)
+			for i in range(len(z_x))
+		])  # (n_test, n_train)
 
-			w[i] = 0.0
+		W = self.kernel_(D)
+
+		for i in range(W.shape[0]):
+			w = W[i]
 			if np.allclose(w.sum(), 0.0):
 				outputs[i] = np.mean(self.y_l_)
 			else:
