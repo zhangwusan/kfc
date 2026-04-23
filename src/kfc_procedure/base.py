@@ -53,13 +53,12 @@ class BaseKFC(BaseEstimator, ABC):
         X_pre, X_agg, y_pre, y_agg = train_test_split(
             X, y, test_size=0.5, random_state=self.random_state, stratify=stratify
         )
-        print(f"Starting K Step on {X_pre.shape[0]} samples...")
         self.kstep_.fit(X_pre)
         clusters = self.kstep_.predict(X_pre)
-        print(f"Starting F Step on {X_pre.shape[0]} samples...")
+        
         self.fstep_.fit(X_pre, y_pre, clusters)
         predictions = self.fstep_.predict(X_agg, clusters)
-        print(f"Starting C Step on {X_agg.shape[0]} samples...")
+        
         X_cstep = np.hstack(list(predictions.values()))
 
         self.cstep_.fit(X_cstep, y_agg)
