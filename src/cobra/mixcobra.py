@@ -180,12 +180,16 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			cols.append(preds.reshape(-1, 1))
 		return np.hstack(cols)
 
-	def _space_projector(self, X, pred_matrix, alpha, beta):
-		params = {"alpha" : alpha, "beta" : beta, "one_parameter": self.one_parameter}
-		projector: BaseSpaceProjector = SpaceProjectorFactory.create("mixcobra", **params)
+	def _space_projector(self, X, pred_matrix):
+		projector: BaseSpaceProjector = SpaceProjectorFactory.create("mixcobra")
 		return projector.transform(X, pred_matrix)
 
 	def _optimize_hyperparameters(self):
+
+		dist_input = self.distance_.matrix(self.input_, self.input_)
+		dist_output = self.distance_.matrix(self.output_, self.output_)
+
+		K = self.kernel_(dist_input, dist_output)
 
 		def objective(params: np.ndarray) -> float:
 			params = np.atleast_1d(params).astype(float)
@@ -196,20 +200,14 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			else:
 				alpha, beta = params[0], params[1]
 
-			z_l = self._space_projector(self.X_l_, self.pred_l_, alpha, beta)
+			# update kernel
+			self.kernel_.set_params(alpha=alpha, beta=beta)
+			K = self.kernel_(dist_input, dist_output)
 
-			n = z_l.shape[0]
-			preds = np.empty(n)
+			n_samples = K.shape[0]
+			preds = np.empty(n_samples, dtype=float)
 
-			D = np.array([
-				self.distance_.pairwise(z_l[i], z_l)
-				for i in range(n)
-			])  # (n, n)
-
-			K = self.kernel_(D)
-
-
-			for i in range(n):
+			for i in range(n_samples):
 				w = K[i]
 				if np.allclose(w.sum(), 0.0):
 					preds[i] = np.mean(self.y_l_)
@@ -263,10 +261,12 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			self.pred_l_ = self._prediction_matrix(self.X_l_)
 		
 		self.distance_ : BaseDistance = DistanceFactory.create(self.distance, **(self.distance_params or {}))
-		self.kernel_ : BaseKernel = KernelFactory.create(self.kernel, **(self.kernel_params or {"alpha" : np.asarray([1.0, 1.0])}))
+		self.kernel_ : BaseKernel = KernelFactory.create(self.kernel, **(self.kernel_params or {'alpha' : 1, 'beta' : 1}))
 		self.aggregator_ : BaseAggregator = AggregatorFactory.create(self.aggregator, **(self.aggregator_params or {}))
 		self.loss_ : BaseLoss = LossFactory.create(self.loss, **(self.loss_params or {}))
 		self.optimizer_ : BaseOptimizer = OptimizerFactory.create(self.optimizer, **(self.optimizer_params or {}))
+	
+		self.input_, self.output_ = self._space_projector(self.X_l_, self.pred_l_)
 
 		self._optimize_hyperparameters()
 		return self
@@ -283,9 +283,9 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		X = check_array(X)
 
 		if not self.as_predictions_:
-			pred_X = self._prediction_matrix(X)
+			preds = self._prediction_matrix(X)
 		else:
-			pred_X = X * self.norm_constant_x_
+			preds = X * self.norm_constant_x_
 		
 		if self.one_parameter:
 			alpha = self.optimization_outputs_["alpha"]
@@ -294,16 +294,16 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			alpha = self.optimization_outputs_["alpha"]
 			beta = self.optimization_outputs_["beta"]
 		
-		z_x = self._space_projector(X, pred_X, alpha, beta)
+		# update kernel with optimize parameters
+		self.kernel_.set_params(alpha=alpha, beta=beta)
 		
-		outputs = np.empty(z_x.shape[0], dtype=float)
+		input, output = self._space_projector(X, preds)
 
-		D = np.array([
-			self.distance_.pairwise(z_x[i], self.z_l_)
-			for i in range(len(z_x))
-		])  # (n_test, n_train)
+		dist_input = self.distance_.matrix(input, self.input_)
+		dist_output = self.distance_.matrix(output, self.output_)
+		W = self.kernel_(dist_input, dist_output)
 
-		W = self.kernel_(D)
+		outputs = np.empty(W.shape[0], dtype=float)
 
 		for i in range(W.shape[0]):
 			w = W[i]
