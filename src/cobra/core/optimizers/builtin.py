@@ -219,7 +219,6 @@ class GradientDescentOptimizer(BaseOptimizer):
             desc="Gradient Descent",
             disable=not self.show_progress
         )
-        print(f"Initial score: {best_score:.4f}")
         for t in iterator:
             grad = self._gradient(objective, x)
 

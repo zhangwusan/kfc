@@ -148,18 +148,15 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         return np.column_stack(cols)
     
     def _optimize_hyperparameters(self):
-        self.z_l_ = self._space_projector(self.X_l_, self.pred_l_)
+        self.distance_matrix_ = self.distance_.matrix(self.z_l_, self.z_l_)
 
         def objective(params: np.ndarray) -> float:
             # update kernel with current bandwidth
-
-            self.kernel_.set_params(alpha=params)
-            n_samples = self.z_l_.shape[0]
-            D = self.distance_.tensor([self.z_l_])
-            print(f"Distance tensor shape: {D.shape}")
-            K = self.kernel_(D)
-            print(f"Kernel matrix shape: {K.shape}")
+            self.kernel_.set_params(alpha=params[0])
+            K = self.kernel_(self.distance_matrix_)
             np.fill_diagonal(K, 0.0)
+
+            n_samples = self.y_l_.shape[0]
 
             preds = np.empty(n_samples, dtype=float)
 
@@ -169,8 +166,6 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
                     preds[i] = np.mean(self.y_l_)
                 else:
                     preds[i] = self.aggregator_.aggregate(self.y_l_, w)
-                
-            print(f"Current params: {params}, Loss: {self.loss_(self.y_l_, preds)}")
             
             return self.loss_(self.y_l_, preds)
 
@@ -233,7 +228,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
 
         self.kernel_ : BaseKernel = KernelFactory.create(
             self.kernel,
-            **(self.kernel_params or {"alpha" : np.asarray([1.0])})
+            **(self.kernel_params or {})
         )
 
         self.aggregator_ : BaseAggregator = AggregatorFactory.create(
@@ -251,6 +246,8 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             **(self.optimizer_params or {})
         )
 
+        self.z_l_ = self._space_projector(self.X_l_, self.pred_l_)
+
         # optimize hyperparameters
         self._optimize_hyperparameters()
         return self
@@ -264,7 +261,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         pred_x = self._prediction_matrix(X)
         z_x = self._space_projector(X, pred_x)
 
-        D = self.distance_()
+        D = self.distance_.matrix(z_x, self.z_l_)
         K = self.kernel_(D)
 
         outputs = np.empty(K.shape[0], dtype=float)
