@@ -278,7 +278,7 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 	def predict(
 		self,
 		X: np.ndarray,
-		pred_X: np.ndarray = Mone,
+		pred_X: np.ndarray,
 		alpha: float | None = None,
 		beta: float | None = None,
 		bandwidth: float | None = None
