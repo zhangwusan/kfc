@@ -142,10 +142,9 @@ class CombineClassifier(ABC, SkBaseEstimator):
 
         if not self.as_predictions_:
             self.base_estimators_ = self._fit_estimators(self.X_k_, self.y_k_)
-            pred_l = self._prediction_matrix(self.X_l_)
-            self.z_l_ = self._space_projector(self.X_l_, pred_l)
+            self.pred_l_ = self._prediction_matrix(self.X_l_)
         else:
-            self.z_l_ = self.X_l_
+            self.pred_l_ = self.X_l_
         
         # create distance, kernel, aggregator
         self.distance_ : BaseDistance = DistanceFactory.create(
@@ -165,6 +164,11 @@ class CombineClassifier(ABC, SkBaseEstimator):
         classes, counts = np.unique(self.y_k_, return_counts=True)
         self.global_majority_class_ = classes[np.argmax(counts)]
 
+        # self.distance_matrix_ = self.distance_.matrix(self.pred_l_, self.y_l_)
+        # K = self.kernel_(self.distance_matrix_)
+        # np.fill_diagonal(K, 0.0)
+        self.z_l_ = self._space_projector(self.X_l_, self.pred_l_)
+
         return self
 
     def predict(self, X):
@@ -172,16 +176,12 @@ class CombineClassifier(ABC, SkBaseEstimator):
 
         X = check_array(X)
 
-        pred_x = self._prediction_matrix(X)
-        z_x = self._space_projector(X, pred_x)
+        preds = self._prediction_matrix(X)
+        z = self._space_projector(X, preds)
 
         outputs = []
 
-        D = np.array([
-            self.distance_.pairwise(z_x[i], self.z_l_)
-            for i in range(len(z_x))
-        ])
-
+        D = self.distance_.matrix(z, self.z_l_)
         K = self.kernel_(D)
 
         for i in range(K.shape[0]):
