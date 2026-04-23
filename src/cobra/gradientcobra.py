@@ -38,7 +38,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         kernel_params: dict[str, Any] | None = None,
         aggregator: str = "weighted_mean",
         aggregator_params: dict[str, Any] | None = None,
-        splitter: str = "holdout",
+        splitter: str = "kfold",
         splitter_params: dict[str, Any] | None = None,
         loss: str = "mse",
         loss_params: dict[str, Any] | None = None,
@@ -83,11 +83,12 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             iloc_l, iloc_k = np.arange(len(y_l_)), np.arange(len(y))
             self.as_predictions_ = True
         else:
-            split_params = dict(self.splitter_params or {})
-            split_params.setdefault("random_state", self.random_state)
+            # provide static splitter
             splitter: BaseDataSplitter = SplitterFactory.create(
-                self.splitter,
-                **split_params
+                "split_overlap",
+                split_ratio=0.5,
+                overlap=0.0,
+                random_state=self.random_state
             )
             iloc_k, iloc_l = splitter.split(X, y)
             X_k_, y_k_ = X[iloc_k], y[iloc_k]
@@ -150,22 +151,27 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
     def _optimize_hyperparameters(self):
         self.distance_matrix_ = self.distance_.matrix(self.z_l_, self.z_l_)
 
+        folds = self.splitter_.split(self.X_l_, self.y_l_)
+        # update using kfold cv
         def objective(params: np.ndarray) -> float:
             # update kernel with current bandwidth
             self.kernel_.set_params(alpha=params[0])
-            K = self.kernel_(self.distance_matrix_)
-            np.fill_diagonal(K, 0.0)
-
+            K = self.kernel_(self.distance_matrix_.copy())
             n_samples = self.y_l_.shape[0]
 
             preds = np.empty(n_samples, dtype=float)
 
-            for i in range(n_samples):
-                w = K[i]
-                if np.allclose(w.sum(), 0.0):
-                    preds[i] = np.mean(self.y_l_)
-                else:
-                    preds[i] = self.aggregator_.aggregate(self.y_l_, w)
+            for train_idx, val_idx in folds:
+                w = K[val_idx][:, train_idx]
+                y_train = self.y_l_[train_idx]
+
+                denom = w.sum(axis=1)
+
+                for i, v in enumerate(val_idx):
+                    if denom[i] < 1e-12:
+                        preds[v] = np.mean(y_train)
+                    else:
+                        preds[v] = self.aggregator_.aggregate(y_train, w[i])
             
             return self.loss_(self.y_l_, preds)
 
@@ -244,6 +250,11 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         self.optimizer_ : BaseOptimizer = OptimizerFactory.create(
             self.optimizer,
             **(self.optimizer_params or {})
+        )
+
+        self.splitter_ : BaseDataSplitter = SplitterFactory.create(
+            self.splitter,
+            **(self.splitter_params or {"random_state": self.random_state})
         )
 
         self.z_l_ = self._space_projector(self.X_l_, self.pred_l_)

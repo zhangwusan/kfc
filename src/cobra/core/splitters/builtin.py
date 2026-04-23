@@ -30,26 +30,41 @@ class RandomHoldoutSplitter(BaseDataSplitter):
         )
         return np.asarray(train_idx), np.asarray(cal_idx)
 
-
 @SplitterFactory.register("kfold")
 class KFoldSplitter(BaseDataSplitter):
-    """Use one fold as calibration and the rest as train indices."""
+    """
+    Returns full KFold splits:
+    List of (train_idx, val_idx)
+    """
 
-    def __init__(self, n_splits: int = 5, fold_index: int = 0, random_state: int | None = None) -> None:
+    def __init__(
+        self,
+        n_splits: int = 5,
+        shuffle: bool = True,
+        random_state: int | None = None,
+    ):
         self.n_splits = int(n_splits)
-        self.fold_index = int(fold_index)
+        self.shuffle = shuffle
         self.random_state = random_state
 
-    def split(self, x: ArrayLike, y: ArrayLike) -> tuple[np.ndarray, np.ndarray]:
-        _ = y
+    def split(self, x: ArrayLike, y: ArrayLike):
         n_samples = np.asarray(x).shape[0]
         indices = np.arange(n_samples)
-        kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.random_state)
-        folds = list(kf.split(indices))
-        if not 0 <= self.fold_index < len(folds):
-            raise ValueError("fold_index is out of range for n_splits.")
-        train_idx, cal_idx = folds[self.fold_index]
-        return np.asarray(train_idx), np.asarray(cal_idx)
+
+        kf = KFold(
+            n_splits=self.n_splits,
+            shuffle=self.shuffle,
+            random_state=self.random_state
+        )
+
+        return [
+            (
+                np.asarray(train_idx, dtype=np.int64),
+                np.asarray(val_idx, dtype=np.int64)
+            )
+            for train_idx, val_idx in kf.split(indices)
+        ]
+
 @SplitterFactory.register("split_overlap")
 class OverlapSplitter(BaseDataSplitter):
     """
@@ -64,12 +79,12 @@ class OverlapSplitter(BaseDataSplitter):
 
     def __init__(
         self,
-        split: float = 0.5,
+        split_ratio: float = 0.5,
         overlap: float = 0.0,
         shuffle: bool = True,
         random_state: int | None = None,
     ):
-        self.split = float(split)
+        self.split_ratio = float(split_ratio)
         self.overlap = float(overlap)
         self.shuffle = shuffle
         self.random_state = random_state
@@ -94,18 +109,18 @@ class OverlapSplitter(BaseDataSplitter):
         indices = self._shuffle_indices(indices)
 
         # ---- boundary validation ----
-        if not (0 < self.split < 1):
-            raise ValueError(f"`split` must be in (0,1), got {self.split}")
+        if not (0 < self.split_ratio < 1):
+            raise ValueError(f"`split_ratio` must be in (0,1), got {self.split_ratio}")
 
         if not (0 <= self.overlap < 1):
             raise ValueError(f"`overlap` must be in [0,1), got {self.overlap}")
 
-        if self.overlap >= self.split:
-            raise ValueError("`overlap` must be smaller than `split`")
+        if self.overlap >= self.split_ratio:
+            raise ValueError("`overlap` must be smaller than `split_ratio`")
 
         # ---- compute cut points ----
-        k1 = int(n * (self.split - self.overlap / 2))
-        k2 = int(n * (self.split + self.overlap / 2))
+        k1 = int(n * (self.split_ratio - self.overlap / 2))
+        k2 = int(n * (self.split_ratio + self.overlap / 2))
 
         # clamp to valid range
         k1 = max(0, min(k1, n))
