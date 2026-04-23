@@ -84,7 +84,7 @@ class GridSearchOptimizer(BaseOptimizer):
         iterator = tqdm(self.grid, desc="Grid Search", disable=not self.show_progress)
 
         for val in iterator:
-            x = np.atleast_1d(val).astype(float)
+            x = np.atleast_1d(val)
             score = objective(x)
 
             if score < best_score:
@@ -170,7 +170,7 @@ class GradientDescentOptimizer(BaseOptimizer):
         """
         Compute finite-difference gradient.
         """
-        x = np.atleast_1d(x).astype(float)
+        x = np.atleast_1d(x)
         grad = np.zeros_like(x)
 
         for i in range(len(x)):
@@ -206,7 +206,7 @@ class GradientDescentOptimizer(BaseOptimizer):
         best_param : np.ndarray
         """
 
-        x = np.atleast_1d(initial_value).astype(float)
+        x = np.atleast_1d(initial_value)
         best_x = x.copy()
         best_score = objective(x)
 

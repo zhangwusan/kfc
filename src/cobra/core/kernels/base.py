@@ -1,31 +1,30 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-
 import numpy as np
 
 from cobra.core.factory import BaseFactory
+
 
 class BaseKernel(ABC):
     """
     Two-level parameter system:
 
     1. alpha: fusion weights (view-level)
+        - REQUIRED for multi-view
+        - MUST be np.ndarray of shape (k,)
     2. params: kernel parameters
     """
 
-    def __init__(self, alpha=None, **params):
-        self.alpha = None
-        self.params = {}
+    def __init__(self, alpha: np.ndarray, **params):
+        self.alpha: np.ndarray
+        self.params: dict = {}
         self.set_params(alpha=alpha, **params)
 
     # ---------------- parameters ----------------
-    def set_params(self, alpha=None, **params):
-        if alpha is not None:
-            self.alpha = np.asarray(alpha, dtype=float)
-
+    def set_params(self, alpha: np.ndarray, **params):
+        self.alpha = alpha
         for k, v in params.items():
             self.params[k] = v
-
         return self
 
     def get_params(self):
@@ -34,20 +33,20 @@ class BaseKernel(ABC):
             **self.params
         }
 
-    # ---------------- fusion (ALPHA ONLY) ----------------
+    # ---------------- fusion ----------------
     def fuse(self, D: np.ndarray) -> np.ndarray:
-        if D.ndim == 2:
+        D = np.asarray(D, dtype=float)
+
+        # single view → no fusion
+        if D.ndim in (1, 2):
             return D
 
-        if self.alpha is None:
-            raise ValueError("alpha must be provided for multi-view fusion")
+        if D.shape[0] != len(self.alpha):
+            raise ValueError(
+                f"Mismatch: {D.shape[0]} views vs {len(self.alpha)} alpha"
+            )
 
-        alpha = np.asarray(self.alpha, dtype=float)
-
-        if D.shape[0] != len(alpha):
-            raise ValueError("alpha shape mismatch with D")
-
-        return np.tensordot(alpha, D, axes=(0, 0))
+        return np.tensordot(self.alpha, D, axes=(0, 0))
 
     # ---------------- main API ----------------
     def __call__(self, D, **params):
@@ -59,8 +58,9 @@ class BaseKernel(ABC):
 
         return self.compute(D_fused, self.params)
 
+    # ---------------- core ----------------
     @abstractmethod
-    def compute(self, D, params):
+    def compute(self, D: np.ndarray, params: dict) -> np.ndarray:
         raise NotImplementedError
 
 class KernelFactory(BaseFactory):

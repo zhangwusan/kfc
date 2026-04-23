@@ -154,7 +154,7 @@ class CombineClassifier(ABC, SkBaseEstimator):
         )
         self.kernel_ : BaseKernel = KernelFactory.create(
             self.kernel,
-            **(self.kernel_params or {"alpha" : [1.0]})
+            **(self.kernel_params or {"alpha" : np.asarray([1.0])})
         )
 
         self.aggregator_ : BaseAggregator = AggregatorFactory.create(

@@ -149,24 +149,27 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         def objective(params: np.ndarray) -> float:
             # update kernel with current bandwidth
 
-            self.kernel_.update_params(bandwidth=params[0])
-
+            self.kernel_.set_params({"alpha": np.asarray(params)})
             n_samples = self.z_l_.shape[0]
+            D = np.array([
+                self.distance_.pairwise(self.z_l_[i], self.z_l_)
+                for i in range(n_samples)
+            ])
+            K = self.kernel_(D)
+            np.fill_diagonal(K, 0.0)
+
             preds = np.empty(n_samples, dtype=float)
 
             for i in range(n_samples):
-                d = self.distance_.pairwise(self.z_l_[i], self.z_l_)
-                w = self.kernel_(d)
-
-                w[i] = 0.0
+                w = K[i]
                 if np.allclose(w.sum(), 0.0):
-                    preds[i] = float(np.mean(self.y_l_))
+                    preds[i] = np.mean(self.y_l_)
                 else:
                     preds[i] = self.aggregator_.aggregate(self.y_l_, w)
             
-            return self.loss_(self.y_l_, preds)
+            return np.asarray(self.loss_(self.y_l_, preds))
 
-        best, histories = self.optimizer_.optimize(objective=objective, initial_value=[1.0])
+        best, histories = self.optimizer_.optimize(objective=objective, initial_value=np.asarray([1.0]))
 
         self.optimization_outputs_ = {
             "method": self.optimizer,
@@ -214,7 +217,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
 
         self.kernel_ : BaseKernel = KernelFactory.create(
             self.kernel,
-            **(self.kernel_params or {})
+            **(self.kernel_params or {"alpha" : np.asarray([1.0])})
         )
 
         self.aggregator_ : BaseAggregator = AggregatorFactory.create(
@@ -243,16 +246,22 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         check_is_fitted(self, ["z_l_", "distance_", "kernel_", "aggregator_"])
         X = check_array(X)
         pred_x = self._prediction_matrix(X)
-
         z_x = self._space_projector(X, pred_x)
 
-        outputs = np.empty(z_x.shape[0], dtype=float)
+        D = np.array([
+            self.distance_.pairwise(z_x[i], self.z_l_)
+            for i in range(len(z_x))
+        ])  # (n_test, n_train)
+        K = self.kernel_(D)
 
-        for i, row in enumerate(z_x):
-            d = self.distance_.pairwise(row, self.z_l_)
-            w = self.kernel_(d)
+        outputs = np.empty(K.shape[0], dtype=float)
 
-            outputs[i] = self.aggregator_.aggregate(self.y_l_, w)
+        for i in range(K.shape[0]):
+            w = K[i]
+            if np.allclose(w.sum(), 0.0):
+                outputs[i] = np.mean(self.y_l_)
+            else:
+                outputs[i] = self.aggregator_.aggregate(self.y_l_, w)
 
         return outputs
-        
+    
