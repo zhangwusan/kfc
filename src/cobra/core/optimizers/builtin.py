@@ -140,7 +140,7 @@ class GradientDescentOptimizer(BaseOptimizer):
 
     def __init__(
         self,
-        learning_rate: float = 0.1,
+        learning_rate: float = 0.01,
         max_iter: int = 100,
         tol: float = 1e-6,
         eps: float = 1e-5,
@@ -219,7 +219,7 @@ class GradientDescentOptimizer(BaseOptimizer):
             desc="Gradient Descent",
             disable=not self.show_progress
         )
-
+        print(f"Initial score: {best_score:.4f}")
         for t in iterator:
             grad = self._gradient(objective, x)
 

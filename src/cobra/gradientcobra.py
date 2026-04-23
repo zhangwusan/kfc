@@ -46,6 +46,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         optimizer_params: dict[str, Any] | None = None,
 
         bandwidth_list: np.ndarray | None = None,
+        norm_constant = None,
         random_state: int | None = None
     ):
         self.estimators = estimators
@@ -63,6 +64,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         self.optimizer = optimizer
         self.optimizer_params = optimizer_params
 
+        self.norm_constant = norm_constant
         self.bandwidth_list = bandwidth_list
         self.random_state = random_state
 
@@ -146,16 +148,17 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         return np.column_stack(cols)
     
     def _optimize_hyperparameters(self):
+        self.z_l_ = self._space_projector(self.X_l_, self.pred_l_)
+
         def objective(params: np.ndarray) -> float:
             # update kernel with current bandwidth
 
-            self.kernel_.set_params({"alpha": np.asarray(params)})
+            self.kernel_.set_params(alpha=params)
             n_samples = self.z_l_.shape[0]
-            D = np.array([
-                self.distance_.pairwise(self.z_l_[i], self.z_l_)
-                for i in range(n_samples)
-            ])
+            D = self.distance_.tensor([self.z_l_])
+            print(f"Distance tensor shape: {D.shape}")
             K = self.kernel_(D)
+            print(f"Kernel matrix shape: {K.shape}")
             np.fill_diagonal(K, 0.0)
 
             preds = np.empty(n_samples, dtype=float)
@@ -166,10 +169,12 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
                     preds[i] = np.mean(self.y_l_)
                 else:
                     preds[i] = self.aggregator_.aggregate(self.y_l_, w)
+                
+            print(f"Current params: {params}, Loss: {self.loss_(self.y_l_, preds)}")
             
-            return np.asarray(self.loss_(self.y_l_, preds))
+            return self.loss_(self.y_l_, preds)
 
-        best, histories = self.optimizer_.optimize(objective=objective, initial_value=np.asarray([1.0]))
+        best, histories = self.optimizer_.optimize(objective=objective, initial_value=np.asarray([0.5]))
 
         self.optimization_outputs_ = {
             "method": self.optimizer,
@@ -178,6 +183,16 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             "histories" : histories
         }
     
+    def _resolve_norm_constant(self, y):
+        if self.estimators is None:
+            M = 6
+        else:
+            M = len(self.estimators)
+        if self.norm_constant is None:
+            self.norm_constant_ = 30 / (np.max(np.abs(y)) * M)
+        else:
+            self.norm_constant_ = self.norm_constant / (np.max(np.abs(y)) * M)
+
     def fit(
         self,
         X : np.ndarray,
@@ -203,11 +218,12 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
 
         self.estimators_ = self._fit_estimators(self.X_k_, self.y_k_)
 
+        self._resolve_norm_constant(y)
+
         if not self.as_predictions_:
-            pred_l = self._prediction_matrix(self.X_l_)
-            self.z_l_ = self._space_projector(self.X_l_, pred_l)
+            self.pred_l_ = self._prediction_matrix(self.X_l_)
         else:
-            self.z_l_ = self.X_l_
+            self.pred_l_ = self.X_l_
 
         # resolve component
         self.distance_ : BaseDistance = DistanceFactory.create(
@@ -248,10 +264,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         pred_x = self._prediction_matrix(X)
         z_x = self._space_projector(X, pred_x)
 
-        D = np.array([
-            self.distance_.pairwise(z_x[i], self.z_l_)
-            for i in range(len(z_x))
-        ])  # (n_test, n_train)
+        D = self.distance_()
         K = self.kernel_(D)
 
         outputs = np.empty(K.shape[0], dtype=float)

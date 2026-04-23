@@ -43,24 +43,8 @@ class MixCOBRASpaceProjector(BaseSpaceProjector):
     MixCOBRA joint space:
     combines input + prediction geometry.
     """
-    def __init__(self, alpha: float = 1.0, beta: float = 1.0, one_parameter: bool = False) -> None:
-        self.alpha = float(alpha)
-        self.beta = float(beta)
-        self.one_parameter = one_parameter
-
     def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
         x = _to_2d(x)
         y = _to_2d(model_outputs)
 
-        if x.shape[0] != y.shape[0]:
-            raise ValueError("x and model_outputs must match rows")
-        
-        if self.one_parameter:
-            if self.beta != 0.0:
-                raise ValueError("beta must be zero when one_parameter is True")
-            return self.alpha * np.hstack([x, y])
-
-        return np.hstack([
-            self.alpha * x,
-            self.beta * y
-        ])
+        return x, y

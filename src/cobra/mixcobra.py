@@ -269,10 +269,6 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		self.optimizer_ : BaseOptimizer = OptimizerFactory.create(self.optimizer, **(self.optimizer_params or {}))
 
 		self._optimize_hyperparameters()
-		self.opt_alpha_ = self.optimization_outputs_["alpha"]
-		self.opt_beta_ = self.optimization_outputs_["beta"]
-		self.z_l_ = self._space_projector(self.X_l_, self.pred_l_, self.opt_alpha_, self.opt_beta_)
-        
 		return self
 		
 	def predict(

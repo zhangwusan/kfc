@@ -18,8 +18,22 @@ class BaseDistance(ABC):
         return self.params
 
     @abstractmethod
-    def __call__(self, x, y):
-        pass
+    def matrix(self, x: np.ndarray, y : np.ndarray) -> np.ndarray:
+        """
+        Compute the distance matrix between two arrays.
+        
+        Parameters
+        ----------
+        x : array-like, shape (n_samples_x, n_features)
+            First input array.
+        y : array-like, shape (n_samples_y, n_features)
+            Second input array.
+        Returns
+        -------
+        D : array, shape (n_samples_x, n_samples_y)
+            Distance matrix between x and y.
+        """
+        ...
 
 class DistanceFactory(BaseFactory):
     pass
