@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 from typing import Any, List, Union
+from matplotlib.pyplot import flag
 import numpy as np
 
 from sklearn.base import RegressorMixin, BaseEstimator as SkBaseEstimator
@@ -145,9 +146,9 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         return np.column_stack(cols)
     
     def _optimize_hyperparameters(self):
-        def objective(bandwidth):
+        def objective(params: np.ndarray) -> float:
             # update kernel with current bandwidth
-            self.kernel_.update_params(bandwidth=bandwidth)
+            self.kernel_.update_params(bandwidth=params[0])
 
             n_samples = self.z_l_.shape[0]
             preds = np.empty(n_samples, dtype=float)
@@ -164,7 +165,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             
             return self.loss_(self.y_l_, preds)
 
-        best = self.optimizer_.optimize(objective=objective, initial_value=1.0)
+        best = self.optimizer_.optimize(objective=objective, initial_value=[1.0])
 
         self.optimization_outputs_ = {
             "method": self.optimizer,

@@ -48,7 +48,7 @@ class GridSearchOptimizer(BaseOptimizer):
     def optimize(
         self,
         objective: Callable[[np.ndarray], float],
-        initial_value
+        initial_value: np.ndarray
     ):
         """
         Run grid search.
@@ -58,12 +58,12 @@ class GridSearchOptimizer(BaseOptimizer):
         objective : callable
             Function mapping parameters → scalar loss.
 
-        initial_value : float or np.ndarray
+        initial_value : np.ndarray
             Used to infer dimensionality if grid is None.
 
         Returns
         -------
-        best_param : float or np.ndarray
+        best_param : np.ndarray
         """
 
         # --- infer dimension ---
@@ -94,7 +94,7 @@ class GridSearchOptimizer(BaseOptimizer):
         if best_x is None:
             raise RuntimeError("Grid search failed to find a valid parameter.")
 
-        return best_x if len(best_x) > 1 else best_x[0]
+        return best_x
 
 
 # =========================================================
@@ -193,12 +193,12 @@ class GradientDescentOptimizer(BaseOptimizer):
         objective : callable
             Function mapping parameters → scalar loss.
 
-        initial_value : float or np.ndarray
+        initial_value : np.ndarray
             Initial guess.
 
         Returns
         -------
-        best_param : float or np.ndarray
+        best_param : np.ndarray
         """
 
         x = np.atleast_1d(initial_value).astype(float)
@@ -241,4 +241,4 @@ class GradientDescentOptimizer(BaseOptimizer):
                     grad=f"{np.linalg.norm(grad):.4f}"
                 )
 
-        return best_x if len(best_x) > 1 else best_x[0]
+        return best_x
