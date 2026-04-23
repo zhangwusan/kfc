@@ -53,6 +53,8 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 
 		alpha_list: np.ndarray | None = None,
 		beta_list: np.ndarray | None = None,
+		norm_constant_x = None,
+		norm_constant_y = None,
 		one_parameter: bool = False,
 		random_state: int | None = None
 	):
@@ -73,11 +75,30 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 
 		self.alpha_list = alpha_list
 		self.beta_list = beta_list
+		self.norm_constant_x = norm_constant_x
+		self.norm_constant_y = norm_constant_y
 		self.one_parameter = one_parameter
 		self.random_state = random_state
+
+	
+	def _resolve_norm_constants(self, X, y):
+		if self.norm_constant_x is None:
+			self.norm_constant_x_ = 5 / (np.max(np.abs(X), axis=0) * X.shape[1])
+		else:
+			self.norm_constant_x_ = self.norm_constant_x / (np.max(np.abs(X), axis=0) * X.shape[1])
+		
+		if self.estimators is None:
+			M = 6
+		else:
+			M = len(self.estimators)
+
+		if self.norm_constant_y is None:
+			self.norm_constant_y_ = 5 / (np.max(np.abs(y)) * M)
+		else:
+			self.norm_constant_y_ = self.norm_constant_y / (np.max(np.abs(y)) * M)
         
 	
-	def _resolve_fit_split_context(self, X, y, X_l, y_l):
+	def _resolve_fit_split_context(self, X, y, X_l, y_l, pred_features=None):
 		"""
 		Returns: X_k, y_k, X_l, y_l, iloc_k, iloc_l, as_predictions
 			X_k, y_k: training set for base estimators
@@ -91,6 +112,13 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			y_k_, y_l_ = y, y_l
 			iloc_l, iloc_k = np.arange(len(y_l_)), np.arange(len(y))
 			self.as_predictions_ = True
+		elif pred_features is not None:
+			X_l_, y_l_ = X, y
+			iloc_l, iloc_k = np.arange(len(y_l_)), np.arange(len(y))
+			self.as_predictions_ = True
+			self.pred_l_ = check_array(pred_features) * self.norm_constant_y_
+			if self.pred_l_.shape[0] != self.y_l_.shape[0]:
+				raise ValueError("Incompatible shapes between y_l and pred_features")
 		else:
 			split_params = dict(self.splitter_params or {})
 			split_params.setdefault("random_state", self.random_state)
@@ -148,52 +176,124 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 
 		cols = []
 		for est in self.base_estimators_:
-			cols.append(np.asarray(est.predict(X)).reshape(-1, 1))
+			preds = est.predict(X) * self.norm_constant_y_
+			cols.append(preds.reshape(-1, 1))
 		return np.hstack(cols)
 
 	def _space_projector(self, X, pred_matrix, alpha, beta):
-		params = {"alpha" : alpha, "beta" : beta}
+		params = {"alpha" : alpha, "beta" : beta, "one_parameter": self.one_parameter}
 		projector: BaseSpaceProjector = SpaceProjectorFactory.create("mixcobra", **params)
 		return projector.transform(X, pred_matrix)
+
+	def _optimize_hyperparameters(self):
+
+		def objective(params: np.ndarray) -> float:
+			params = np.atleast_1d(params).astype(float)
+
+			if self.one_parameter:
+				alpha = params[0]
+				beta = 0.0
+			else:
+				alpha, beta = params[0], params[1]
+
+			z_l = self._space_projector(self.X_l_, self.pred_l_, alpha, beta)
+
+			n = z_l.shape[0]
+			preds = np.empty(n)
+
+			for i in range(n):
+				d = self.distance_.pairwise(z_l[i], z_l)
+				w = self.kernel_(d)
+
+				w[i] = 0.0
+
+				if np.allclose(w.sum(), 0.0):
+					preds[i] = np.mean(self.y_l_)
+				else:
+					preds[i] = self.aggregator_.aggregate(self.y_l_, w)
+
+			return self.loss_(self.y_l_, preds)
+		
+		if self.one_parameter:
+			best = self.optimizer_.optimize(
+				objective,
+				initial_value=np.array([1.0])
+			)
+			alpha = float(best[0])
+			beta = 0.0
+		else:
+			best = self.optimizer_.optimize(
+				objective,
+				initial_value=np.array([1.0, 1.0])
+			)
+			alpha = float(best[0])
+			beta = float(best[1])
+
+		self.optimization_outputs_ = {
+			"alpha": alpha,
+			"beta": beta,
+			"risk": objective([alpha, beta] if not self.one_parameter else [alpha]),
+		}		
+
 
 	def fit(
 		self,
 		X: np.ndarray,
 		y: np.ndarray,
 		X_l: np.ndarray | None = None,
-		y_l: np.ndarray | None = None
+		y_l: np.ndarray | None = None,
+		pred_features: np.ndarray | None = None
 	):
 		
 		(
 			self.X_k_, self.y_k_,
 			self.X_l_, self.y_l_,
 			self.iloc_k_, self.iloc_l_
-		) = self._resolve_fit_split_context(X, y, X_l, y_l)
+		) = self._resolve_fit_split_context(X, y, X_l, y_l, pred_features)
+
+		self._resolve_norm_constants(X, y)
 
 		if not self.as_predictions_:
 			self.base_estimators_ = self._fit_estimators(self.X_k_, self.y_k_)
-			pred_l = self._prediction_matrix(self.X_l_)
-			self.z_l_ = self._space_projector(self.X_l_, pred_l, 1.0, 1.0)
-		else:
-			self.z_l_ = self.X_l_
+			self.pred_l_ = self._prediction_matrix(self.X_l_)
 		
 		self.distance_ : BaseDistance = DistanceFactory.create(self.distance, **(self.distance_params or {}))
 		self.kernel_ : BaseKernel = KernelFactory.create(self.kernel, **(self.kernel_params or {}))
 		self.aggregator_ : BaseAggregator = AggregatorFactory.create(self.aggregator, **(self.aggregator_params or {}))
 		self.loss_ : BaseLoss = LossFactory.create(self.loss, **(self.loss_params or {}))
 		self.optimizer_ : BaseOptimizer = OptimizerFactory.create(self.optimizer, **(self.optimizer_params or {}))
+
+		self._optimize_hyperparameters()
+		self.opt_alpha_ = self.optimization_outputs_["alpha"]
+		self.opt_beta_ = self.optimization_outputs_["beta"]
+		self.z_l_ = self._space_projector(self.X_l_, self.pred_l_, self.opt_alpha_, self.opt_beta_)
         
 		return self
 		
-	def predict(self, X: np.ndarray) -> np.ndarray:
+	def predict(
+		self,
+		X: np.ndarray,
+		pred_X: np.ndarray,
+		alpha: float | None = None,
+		beta: float | None = None,
+		bandwidth: float | None = None
+	) -> np.ndarray:
 		check_is_fitted(self)
 		X = check_array(X)
 
 		if not self.as_predictions_:
-			pred_x = self._prediction_matrix(X)
-			z_x = self._space_projector(X, pred_x, 1.0, 1.0)
+			pred_X = self._prediction_matrix(X)
 		else:
-			z_x = X
+			pred_X = X * self.norm_constant_x_
+		
+		if self.one_parameter:
+			alpha = self.optimization_outputs_["alpha"]
+			beta = 0.0
+		else:
+			alpha = self.optimization_outputs_["alpha"]
+			beta = self.optimization_outputs_["beta"]
+		
+		z_x = self._space_projector(X, pred_X, alpha, beta)
 		
 		outputs = np.empty(z_x.shape[0], dtype=float)
 

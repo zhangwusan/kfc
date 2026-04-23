@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
+import numpy as np
+
 from cobra.core.factory import BaseFactory
 
 try:
@@ -18,7 +20,9 @@ class BaseOptimizer(ABC):
     """Optimize a scalar objective over a scalar parameter."""
 
     @abstractmethod
-    def optimize(self, objective: Callable[[float], float], initial_value: float) -> float:
+    def optimize(self,
+        objective: Callable[[np.ndarray], float],
+        initial_value: np.ndarray):
         """Return the best parameter value according to the objective."""
         raise NotImplementedError
 
