@@ -1,85 +1,40 @@
-"""Concrete distance metrics used in consensus-space comparisons."""
+
 
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import ArrayLike
 
-from .base import BaseDistance, DistanceFactory
+from cobra.core.distances.base import BaseDistance
 
-@DistanceFactory.register("euclidean", "l2", "lp")
+@BaseDistance.register("euclidean", "l2")
 class EuclideanDistance(BaseDistance):
-    # -------------------------
-    # Pairwise
-    # -------------------------
-    def pairwise(self, query, candidates, p: int = 2):
-        q = np.asarray(query, dtype=float)
-        X = np.asarray(candidates, dtype=float)
+    def __call__(self, x, y):
+        x = np.asarray(x)
+        y = np.asarray(y)
+        return np.linalg.norm(x - y, axis=-1)
 
-        if q.ndim == 1:
-            q = q[None, :]
-
-        diff = np.abs(X - q)
-        return np.sum(diff ** p, axis=1) ** (1 / p)
-    # -------------------------
-    # Matrix
-    # -------------------------
-    def matrix(self, X, p: int = 2):
-        X = np.asarray(X, dtype=float)
-
-        diff = np.abs(X[:, None, :] - X[None, :, :])
-        return np.sum(diff ** p, axis=-1) ** (1 / p)
-
-@DistanceFactory.register("manhattan", "l1")
+@BaseDistance.register("manhattan", "l1")
 class ManhattanDistance(BaseDistance):
-    """
-    Manhattan (L1) distance implementation.
+    def __call__(self, x, y):
+        x = np.asarray(x)
+        y = np.asarray(y)
+        return np.sum(np.abs(x - y), axis=-1)
 
-    -------------------------
-    Supports:
-    -------------------------
-    - pairwise(query, X) → (n,)
-    - matrix(X) → (n, n)
-    - tensor(X_list) → (k, n, n)
-    """
+@BaseDistance.register("minkowski", "lp")
+class MinkowskiDistance(BaseDistance):
+    def __call__(self, x, y):
+        x = np.asarray(x)
+        y = np.asarray(y)
+        p = self.params.get("p", 3)
+        return np.sum(np.abs(x - y) ** p, axis=-1) ** (1/p)
 
-    # -------------------------
-    # Pairwise
-    # -------------------------
-    def pairwise(self, query: ArrayLike, candidates: ArrayLike, p: int = 1) -> np.ndarray:
-        query = np.asarray(query, dtype=float)
-        X = np.asarray(candidates, dtype=float)
+@BaseDistance.register("cosine")
+class CosineDistance(BaseDistance):
+    def __call__(self, x, y):
+        x = np.asarray(x)
+        y = np.asarray(y)
+        x_norm = np.linalg.norm(x, axis=-1)
+        y_norm = np.linalg.norm(y, axis=-1)
+        dot_product = np.sum(x * y, axis=-1)
+        return 1 - dot_product / (x_norm * y_norm + 1e-10)
 
-        if query.ndim == 1:
-            query = query[None, :]
-
-        return np.sum(np.abs(X - query), axis=1)
-
-    # -------------------------
-    # Matrix
-    # -------------------------
-    def matrix(self, X: ArrayLike, p: int = 1) -> np.ndarray:
-        X = np.asarray(X, dtype=float)
-
-        diff = np.abs(X[:, None, :] - X[None, :, :])
-        return np.sum(diff, axis=-1)
-
-@DistanceFactory.register("hamming")
-class HammingDistance(BaseDistance):
-    """
-    Hamming distance:
-        proportion of mismatched dimensions
-    """
-
-    def pairwise(self, query: ArrayLike, candidates: ArrayLike) -> np.ndarray:
-        q = np.asarray(query)
-        X = np.asarray(candidates)
-
-        return np.mean(X != q, axis=1)
-
-    def matrix(self, X: ArrayLike) -> np.ndarray:
-        X = np.asarray(X)
-
-        # (n,1,d) != (1,n,d)
-        diff = X[:, None, :] != X[None, :, :]
-        return np.mean(diff, axis=-1)
