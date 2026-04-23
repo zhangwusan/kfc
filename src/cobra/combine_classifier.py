@@ -152,10 +152,9 @@ class CombineClassifier(ABC, SkBaseEstimator):
             self.distance,
             **(self.distance_params or {})
         )
-
         self.kernel_ : BaseKernel = KernelFactory.create(
             self.kernel,
-            **(self.kernel_params or {})
+            **(self.kernel_params or {"alpha" : [1.0]})
         )
 
         self.aggregator_ : BaseAggregator = AggregatorFactory.create(
@@ -178,12 +177,16 @@ class CombineClassifier(ABC, SkBaseEstimator):
 
         outputs = []
 
-        for row in z_x:
-            d = self.distance_.pairwise(row, self.z_l_)
-            w = self.kernel_(d)
+        D = np.array([
+            self.distance_.pairwise(z_x[i], self.z_l_)
+            for i in range(len(z_x))
+        ])
 
+        K = self.kernel_(D)
+
+        for i in range(K.shape[0]):
+            w = K[i]
             mask = w > 0
-
             if not np.any(mask):
                 outputs.append(self.global_majority_class_)
                 continue

@@ -1,104 +1,67 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+
 import numpy as np
 
 from cobra.core.factory import BaseFactory
 
-
 class BaseKernel(ABC):
     """
-    Multi-view kernel with explicit tensor fusion.
+    Two-level parameter system:
 
-    D shape:
-        - (n, n)        -> single view
-        - (k, n, n)     -> multi-view
-
-    alpha shape:
-        - (k,)          -> view weights
-
-    Fusion:
-        D_fused = sum_k alpha_k * D_k
-                 = tensordot(alpha, D, axes=(0, 0))
+    1. alpha: fusion weights (view-level)
+    2. params: kernel parameters
     """
 
-    def __init__(self, theta=None, **kwargs):
-        self.theta = theta
-        self.set_params(**kwargs)
-
-    # ---------------- representation ----------------
-    def __repr__(self):
-        attrs = {
-            k: v for k, v in self.__dict__.items()
-            if not k.startswith("_")
-        }
-        return f"{self.__class__.__name__}({attrs})"
+    def __init__(self, alpha=None, **params):
+        self.alpha = None
+        self.params = {}
+        self.set_params(alpha=alpha, **params)
 
     # ---------------- parameters ----------------
-    def set_params(self, theta=None, **kwargs):
-        if theta is not None:
-            self.theta = np.asarray(theta, dtype=float)
+    def set_params(self, alpha=None, **params):
+        if alpha is not None:
+            self.alpha = np.asarray(alpha, dtype=float)
 
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+        for k, v in params.items():
+            self.params[k] = v
 
         return self
 
     def get_params(self):
         return {
-            k: v for k, v in self.__dict__.items()
-            if not k.startswith("_")
+            "alpha": self.alpha,
+            **self.params
         }
 
-    # ---------------- tensor fusion (KEY PART) ----------------
-    def fuse(self, D: np.ndarray, theta: np.ndarray) -> np.ndarray:
-        """
-        Convert multi-view distances -> single distance matrix
-        using weighted linear fusion.
-        """
-        D = np.asarray(D, dtype=float)
-
+    # ---------------- fusion (ALPHA ONLY) ----------------
+    def fuse(self, D: np.ndarray) -> np.ndarray:
         if D.ndim == 2:
-            return D  # already single view
+            return D
 
-        theta = np.asarray(theta, dtype=float)
+        if self.alpha is None:
+            raise ValueError("alpha must be provided for multi-view fusion")
 
-        if D.shape[0] != len(theta):
-            raise ValueError(
-                f"Mismatch: {D.shape[0]} views vs {len(theta)} weights"
-            )
+        alpha = np.asarray(self.alpha, dtype=float)
 
-        # (k, n, n) ⊗ (k,) -> (n, n)
-        return np.tensordot(theta, D, axes=(0, 0))
+        if D.shape[0] != len(alpha):
+            raise ValueError("alpha shape mismatch with D")
+
+        return np.tensordot(alpha, D, axes=(0, 0))
 
     # ---------------- main API ----------------
-    def __call__(self, D, theta=None):
+    def __call__(self, D, **params):
+        if params:
+            self.set_params(**params)
+
         D = np.asarray(D, dtype=float)
+        D_fused = self.fuse(D)
 
-        if theta is not None:
-            self.theta = np.asarray(theta, dtype=float)
+        return self.compute(D_fused, self.params)
 
-        if self.theta is None:
-            raise ValueError("theta must be provided")
-
-        D_fused = self.fuse(D, self.theta)
-
-        # kernel step (single matrix now)
-        return self.compute(D_fused)
-
-    # ---------------- core ----------------
     @abstractmethod
-    def compute(self, D: np.ndarray) -> np.ndarray:
-        """
-        Input:
-            D: (n, n) fused distance matrix
-
-        Output:
-            K: (n, n) kernel matrix
-        """
+    def compute(self, D, params):
         raise NotImplementedError
 
 class KernelFactory(BaseFactory):
-    """
-    Factory for creating kernel instances.
-    """
-    registry = {}
+    """Registry-backed factory for kernel implementations."""

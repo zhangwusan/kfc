@@ -11,18 +11,9 @@ from .base import BaseKernel, KernelFactory
 # =========================
 @KernelFactory.register("indicator", "hard")
 class IndicatorKernel(BaseKernel):
-    """
-    K(x, x') = 1(D < theta)
-    """
-
-    def compute(self, D: np.ndarray) -> np.ndarray:
-        # D is already fused (n, n)
-        theta = getattr(self, "theta", None)
-
-        if theta is None:
-            raise ValueError("theta must be provided for IndicatorKernel")
-
-        return (D < theta).astype(float)
+    def compute(self, D, params):
+        threshold = params.get("theta", 0.5)
+        return (D < threshold).astype(float)
 
 
 # =========================
@@ -30,17 +21,9 @@ class IndicatorKernel(BaseKernel):
 # =========================
 @KernelFactory.register("rbf", "gaussian")
 class RBFKernel(BaseKernel):
-    """
-    K = exp(-theta * D^2)
-    """
-
-    def compute(self, D: np.ndarray) -> np.ndarray:
-        theta = getattr(self, "theta", None)
-
-        if theta is None:
-            raise ValueError("theta must be provided for RBFKernel")
-
-        return np.exp(-theta * (D ** 2))
+    def compute(self, D, params):
+        gamma = params.get("gamma", 1.0)
+        return np.exp(-gamma * D**2)
 
 
 # =========================
@@ -48,14 +31,6 @@ class RBFKernel(BaseKernel):
 # =========================
 @KernelFactory.register("laplace")
 class LaplaceKernel(BaseKernel):
-    """
-    K = exp(-theta * |D|)
-    """
-
-    def compute(self, D: np.ndarray) -> np.ndarray:
-        theta = getattr(self, "theta", None)
-
-        if theta is None:
-            raise ValueError("theta must be provided for LaplaceKernel")
-
-        return np.exp(-theta * np.abs(D))
+    def compute(self, D, params):
+        gamma = params.get("gamma", 1.0)
+        return np.exp(-gamma * np.abs(D))
