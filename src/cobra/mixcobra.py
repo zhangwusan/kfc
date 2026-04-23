@@ -38,7 +38,7 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		self,
 		estimators: list[str | BaseEstimator] | None = None,
 		estimators_params: dict[str, Any] | None = None,
-		splitter: str = "holdout",
+		splitter: str = "kfold",
 		splitter_params: dict[str, Any] | None = None,
 		distance: str = "euclidean",
 		distance_params: dict[str, Any] | None = None,
@@ -120,11 +120,11 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 			if self.pred_l_.shape[0] != self.y_l_.shape[0]:
 				raise ValueError("Incompatible shapes between y_l and pred_features")
 		else:
-			split_params = dict(self.splitter_params or {})
-			split_params.setdefault("random_state", self.random_state)
 			splitter: BaseDataSplitter = SplitterFactory.create(
-				self.splitter,
-				**split_params
+				'split_overlap',
+				split_ratio=0.5,
+				overlap=0.0,
+				random_state=self.random_state
 			)
 			iloc_k, iloc_l = splitter.split(X, y)
 			X_k_, y_k_ = X[iloc_k], y[iloc_k]
@@ -186,57 +186,61 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 
 	def _optimize_hyperparameters(self):
 
-		dist_input = self.distance_.matrix(self.input_, self.input_)
-		dist_output = self.distance_.matrix(self.output_, self.output_)
+		folds = self.splitter_.split(self.X_l_, self.y_l_)
 
-		K = self.kernel_(dist_input, dist_output)
-
-		def objective(params: np.ndarray) -> float:
-			params = np.atleast_1d(params).astype(float)
-
-			if self.one_parameter:
-				alpha = params[0]
-				beta = 0.0
-			else:
-				alpha, beta = params[0], params[1]
-
-			# update kernel
-			self.kernel_.set_params(alpha=alpha, beta=beta)
-			K = self.kernel_(dist_input, dist_output)
-
-			n_samples = K.shape[0]
-			preds = np.empty(n_samples, dtype=float)
-
-			for i in range(n_samples):
-				w = K[i]
-				if np.allclose(w.sum(), 0.0):
-					preds[i] = np.mean(self.y_l_)
-				else:
-					preds[i] = self.aggregator_.aggregate(self.y_l_, w)
-
-			return self.loss_(self.y_l_, preds)
-		
 		if self.one_parameter:
-			best, histories = self.optimizer_.optimize(
-				objective,
-				initial_value=np.array([1.0])
-			)
-			alpha = float(best[0])
-			beta = 0.0
-		else:
-			best, histories = self.optimizer_.optimize(
-				objective,
-				initial_value=np.array([1.0, 1.0])
-			)
-			alpha = float(best[0])
-			beta = float(best[1])
+			# Only optimize alpha, set beta to 0
+			def objective(params):
+				self.kernel_.set_params(alpha=params[0], beta=0.0)
+				mix = np.column_stack((self.input_, self.output_))
+				distance_matrix = self.distance_.matrix(mix, mix)
+				K = self.kernel_(distance_matrix)
+				preds = np.empty(self.y_l_.shape[0], dtype=float)
 
-		self.optimization_outputs_ = {
-			"alpha": alpha,
-			"beta": beta,
-			"risk": objective([alpha, beta] if not self.one_parameter else [alpha]),
-			"histories" : histories
-		}		
+				for train_idx, val_idx in folds:
+					w = K[val_idx][:, train_idx]
+					y_train = self.y_l_[train_idx]
+					for i in range(len(val_idx)):
+						if np.allclose(w[i].sum(), 0.0):
+							preds[val_idx[i]] = np.mean(y_train)
+						else:
+							preds[val_idx[i]] = self.aggregator_.aggregate(y_train, w[i])
+				
+				return self.loss_(self.y_l_, preds)
+
+			best, histories = self.optimizer_.optimize(objective=objective, initial_value=[0.5])
+
+			self.optimization_outputs_ = {
+				"alpha": best[0],
+				"beta": 0.0,
+				"risk": objective(best),
+				"histories" : histories
+			}
+		else:
+			def objective(params):
+				alpha, beta = params
+				self.kernel_.set_params(alpha=alpha, beta=beta)
+				dist_input = self.distance_.matrix(self.input_, self.input_)
+				dist_output = self.distance_.matrix(self.output_, self.output_)
+				K = self.kernel_(dist_input, dist_output)
+				preds = np.empty(self.y_l_.shape[0], dtype=float)
+
+				for train_idx, val_idx in folds:
+					w = K[val_idx][:, train_idx]
+					y_train = self.y_l_[train_idx]
+					for i in range(len(val_idx)):
+						if np.allclose(w[i].sum(), 0.0):
+							preds[val_idx[i]] = np.mean(y_train)
+						else:
+							preds[val_idx[i]] = self.aggregator_.aggregate(y_train, w[i])
+				return self.loss_(self.y_l_, preds)
+			best, histories = self.optimizer_.optimize(objective=objective, initial_value=[0.5, 0.5])
+			self.optimization_outputs_ = {
+				"alpha": best[0],
+				"beta": best[1],
+				"risk": objective(best),
+				"histories" : histories
+			}
 
 
 	def fit(
@@ -265,6 +269,7 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		self.aggregator_ : BaseAggregator = AggregatorFactory.create(self.aggregator, **(self.aggregator_params or {}))
 		self.loss_ : BaseLoss = LossFactory.create(self.loss, **(self.loss_params or {}))
 		self.optimizer_ : BaseOptimizer = OptimizerFactory.create(self.optimizer, **(self.optimizer_params or {}))
+		self.splitter_ : BaseDataSplitter = SplitterFactory.create(self.splitter, **(self.splitter_params or {"random_state": self.random_state}))
 	
 		self.input_, self.output_ = self._space_projector(self.X_l_, self.pred_l_)
 

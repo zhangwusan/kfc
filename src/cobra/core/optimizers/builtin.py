@@ -141,7 +141,7 @@ class GradientDescentOptimizer(BaseOptimizer):
     def __init__(
         self,
         learning_rate: float = 0.01,
-        max_iter: int = 100,
+        max_iter: int = 10,
         tol: float = 1e-6,
         eps: float = 1e-5,
         speed: str = "constant",
