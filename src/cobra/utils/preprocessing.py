@@ -52,7 +52,7 @@ def data_split_overlap(
 
     return X_k, y_k, X_l, y_l, iloc_k, iloc_l
 
-def compute_constant_scale(
+def compute_normalization_constant(
     data: np.ndarray,
     norm_constant: Optional[float] = None,
     scale_factor: float = 1.0,
