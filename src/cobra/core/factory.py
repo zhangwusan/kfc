@@ -1,28 +1,28 @@
 """
-Base Factory for Modular Components
+Base factory module for dynamic class registration and object creation.
 
-This module defines a generic registry-based factory used to dynamically
-construct components in the COBRA-style modular pipeline:
+This module provides the ``BaseFactory`` abstract base class, which implements
+a registry-based factory pattern. Subclasses can register implementation
+classes using decorators and instantiate them dynamically by name.
 
-    estimator → distance → kernel → aggregator → optimizer
+The factory is designed to support modular and extensible architectures,
+especially useful for machine learning pipelines where components such as
+splitters, kernels, optimizers, or estimators need to be selected
+dynamically.
 
-Each module (e.g., KernelFactory, DistanceFactory) should inherit from
-``BaseFactory`` and maintain its own independent registry.
+Examples
+--------
+>>> class KernelFactory(BaseFactory):
+...     pass
 
-The factory enables:
-- Plug-and-play component design
-- Easy extension by researchers
-- String-based configuration (useful for experiments & configs)
-- Decoupling between algorithm logic and implementation details
+>>> @KernelFactory.register("gaussian", "rbf")
+... class GaussianKernel:
+...     def __init__(self, sigma=1.0):
+...         self.sigma = sigma
 
-Example
--------
->>> @KernelFactory.register("rbf", "gaussian")
-... class RBFKernel:
-...     def __init__(self, bandwidth):
-...         self.bandwidth = bandwidth
-
->>> kernel = KernelFactory.create("rbf", bandwidth=1.0)
+>>> kernel = KernelFactory.create("gaussian", sigma=2.0)
+>>> type(kernel).__name__
+'GaussianKernel'
 """
 
 from __future__ import annotations
@@ -33,59 +33,83 @@ from typing import Any, Dict, List, Type
 
 class BaseFactory(ABC):
     """
-    Abstract base class for all component factories.
+    Abstract base class for registry-based factories.
 
-    A factory maintains a registry mapping string aliases to concrete classes.
-    It provides utilities to:
-    - register new components
-    - instantiate components by name
-    - inspect available components
+    This class provides a generic mechanism for registering classes
+    under string names and creating instances dynamically using those names.
 
-    This pattern is critical for research modularity, allowing different
-    implementations of estimators, distances, kernels, aggregators, and
-    optimizers to be swapped without modifying core algorithm code.
+    Each subclass maintains its own independent registry, ensuring that
+    different factory types (e.g., kernels, splitters, optimizers)
+    do not interfere with each other.
+
+    Attributes
+    ----------
+    _registry : Dict[str, Any]
+        Internal mapping from registered names to implementation classes.
 
     Notes
     -----
-    - Each subclass has its own independent registry.
-    - Aliases are case-insensitive (normalized to lowercase).
-    - Designed for extensibility and experimentation workflows.
+    Registration is case-insensitive. All names are stored in lowercase.
+
+    Subclasses automatically receive a fresh registry through
+    ``__init_subclass__()``.
+
+    Examples
+    --------
+    >>> class DistanceFactory(BaseFactory):
+    ...     pass
+
+    >>> @DistanceFactory.register("euclidean")
+    ... class EuclideanDistance:
+    ...     pass
+
+    >>> DistanceFactory.available()
+    ['euclidean']
     """
 
     _registry: Dict[str, Any] = {}
 
     def __init_subclass__(cls, **kwargs) -> None:
-        """Ensure each concrete factory subclass owns an isolated registry."""
+        """
+        Initialize subclass with an independent registry.
+
+        This ensures that each factory subclass maintains its own
+        separate registration dictionary.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Additional keyword arguments passed to parent classes.
+        """
         super().__init_subclass__(**kwargs)
         cls._registry = {}
 
     @classmethod
     def register(cls, *names: str):
         """
-        Register a class under one or more string aliases.
+        Register a class under one or more names.
 
-        This method is intended to be used as a decorator.
+        This method is typically used as a decorator.
 
         Parameters
         ----------
         *names : str
-            One or more aliases used to reference the class.
-            Aliases are case-insensitive and stored in lowercase.
+            One or more string names used to register the target class.
 
         Returns
         -------
-        decorator : callable
+        callable
             A decorator that registers the target class.
 
         Raises
         ------
         KeyError
-            If any alias is already registered in this factory.
+            If a name is already registered.
 
-        Example
-        -------
-        >>> @DistanceFactory.register("euclidean", "l2")
-        ... class EuclideanDistance:
+        Examples
+        --------
+        >>> @KernelFactory.register("gaussian", "rbf")
+        ... class GaussianKernel:
         ...     pass
         """
         def decorator(target_cls: Type) -> Type:
@@ -98,34 +122,35 @@ class BaseFactory(ABC):
                     )
                 cls._registry[key] = target_cls
             return target_cls
+
         return decorator
 
     @classmethod
     def create(cls, name: str, **kwargs) -> Any:
         """
-        Instantiate a registered component by its alias.
+        Create an instance of a registered class.
 
         Parameters
         ----------
         name : str
-            Alias of the component to instantiate (case-insensitive).
-        **kwargs
-            Keyword arguments passed to the component constructor.
+            Name of the registered class to instantiate.
+
+        **kwargs : dict
+            Keyword arguments passed to the class constructor.
 
         Returns
         -------
-        instance : Any
-            Instantiated component.
+        Any
+            Instance of the registered class.
 
         Raises
         ------
         KeyError
-            If the alias is not found in the registry.
+            If the requested name is not registered.
 
-        Example
-        -------
-        >>> kernel = KernelFactory.create("rbf", bandwidth=0.5)
-        >>> distance = DistanceFactory.create("euclidean")
+        Examples
+        --------
+        >>> kernel = KernelFactory.create("gaussian", sigma=1.5)
         """
         key = name.lower()
         if key not in cls._registry:
@@ -138,38 +163,38 @@ class BaseFactory(ABC):
     @classmethod
     def available(cls) -> List[str]:
         """
-        List all registered aliases.
+        Return all registered names.
 
         Returns
         -------
-        list of str
-            Sorted list of available component names.
+        List[str]
+            Sorted list of available registration names.
 
-        Example
-        -------
+        Examples
+        --------
         >>> KernelFactory.available()
-        ['rbf', 'epanechnikov', 'indicator']
+        ['gaussian', 'rbf']
         """
         return sorted(cls._registry)
 
     @classmethod
     def contains(cls, name: str) -> bool:
         """
-        Check whether a component alias exists in the registry.
+        Check whether a name is registered.
 
         Parameters
         ----------
         name : str
-            Alias to check.
+            Name to check.
 
         Returns
         -------
         bool
-            True if the alias is registered, False otherwise.
+            True if the name exists in the registry, otherwise False.
 
-        Example
-        -------
-        >>> KernelFactory.contains("rbf")
+        Examples
+        --------
+        >>> KernelFactory.contains("gaussian")
         True
         """
         return name.lower() in cls._registry
