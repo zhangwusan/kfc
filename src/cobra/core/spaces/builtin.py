@@ -1,50 +1,56 @@
-"""Concrete projectors capturing COBRA and MIXCOBRA geometry."""
+"""
+Normalized spaces
+"""
 
 from __future__ import annotations
 
-import numpy as np
-from numpy.typing import ArrayLike
+from cobra.core.spaces.base import BaseSpaceNormalizer, SpaceNormalizerFactory
+from docs.cobra.core._utils import compute_normalize_constant
 
-from .base import BaseSpaceProjector, SpaceProjectorFactory
+@SpaceNormalizerFactory.register("identity")
+class IdentitySpaceNormalizer(BaseSpaceNormalizer):
+    def transform(self, X, model_outputs):
+        return X, model_outputs
 
+@SpaceNormalizerFactory.register("gradientcobra")
+class GradientCOBRASpaceNormalizer(BaseSpaceNormalizer):
+    def __init__(self, norm_constant = None):
+        self.norm_constant = norm_constant
 
-def _to_2d(arr: ArrayLike) -> np.ndarray:
-    """Normalize array-like input to 2D."""
-    out = np.asarray(arr, dtype=float)
-    if out.ndim == 1:
-        out = out.reshape(-1, 1)
-    if out.ndim != 2:
-        raise ValueError("Expected 1D or 2D input.")
-    return out
+    def transform(self, X, model_outputs):
+        M = model_outputs.shape[1]
+        normalize_constant = compute_normalize_constant(
+            model_outputs,
+            self.norm_constant,
+            scale_factor=30.0,
+            M=M
+        )
 
-@SpaceProjectorFactory.register("combine_classifier")
-class CombineClassifierSpaceProjector(BaseSpaceProjector):
-    """
-    COBRA space:
-    purely prediction space geometry.
-    """
+        Y = model_outputs / normalize_constant
 
-    def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
-        return _to_2d(model_outputs)
+        return X, Y
+    
+@SpaceNormalizerFactory.register("mixcobra")
+class MixCOBRASpaceNormalizer(BaseSpaceNormalizer):
+    def __init__(self, norm_constant_x = None, norm_constant_y = None):
+        self.norm_constant_x = norm_constant_x
+        self.norm_constant_y = norm_constant_y
 
-@SpaceProjectorFactory.register("gradientcobra", "prediction_only")
-class PredictionOnlyProjector(BaseSpaceProjector):
-    """
-    GradientCOBRA space:
-    purely prediction space geometry.
-    """
+    def transform(self, X, model_outputs):
+        M = model_outputs.shape[1]
+        normalize_constant_x = compute_normalize_constant(
+            X,
+            self.norm_constant_x,
+            scale_factor=30.0,
+            M=M
+        )
+        normalize_constant_y = compute_normalize_constant(
+            model_outputs,
+            self.norm_constant_y,
+            scale_factor=30.0,
+            M=M
+        )
+        X = X / normalize_constant_x
+        Y = model_outputs / normalize_constant_y
 
-    def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
-        return _to_2d(model_outputs)
-
-@SpaceProjectorFactory.register("mixcobra", "tradeoff")
-class MixCOBRASpaceProjector(BaseSpaceProjector):
-    """
-    MixCOBRA joint space:
-    combines input + prediction geometry.
-    """
-    def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
-        x = _to_2d(x)
-        y = _to_2d(model_outputs)
-
-        return x, y
+        return X, Y

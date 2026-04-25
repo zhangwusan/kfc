@@ -10,14 +10,21 @@ from numpy.typing import ArrayLike
 from cobra.core.factory import BaseFactory
 
 
-class BaseSpaceProjector(ABC):
-    """Map raw inputs and model outputs to a comparable feature space."""
-
+class BaseSpaceNormalizer(ABC):
     @abstractmethod
-    def transform(self, x: ArrayLike, model_outputs: ArrayLike) -> np.ndarray:
-        """Project samples into a 2D consensus representation."""
-        raise NotImplementedError
+    def transform(
+        self,
+        X: np.ndarray,
+        model_outputs: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Return normalized feature space and prediction space.
+        Returns
+        -------
+        X_norm : np.ndarray
+        Y_norm : np.ndarray
+        """
+        pass
 
-
-class SpaceProjectorFactory(BaseFactory):
-    """Registry-backed factory for projector implementations."""
+class SpaceNormalizerFactory(BaseFactory):
+    """Registry-backed factory for normalizer implementations."""
