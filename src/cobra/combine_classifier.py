@@ -7,16 +7,13 @@ from abc import ABC
 from typing import Any, Dict, List, Union
 
 import numpy as np
-from sklearn.base import BaseEstimator as SkBaseEstimator, clone
-from sklearn.utils import check_X_y, check_array
-from sklearn.utils.validation import check_is_fitted
+from sklearn.base import BaseEstimator as SkBaseEstimator
+from sklearn.utils import check_array
 
 from cobra.core.aggregators.base import AggregatorFactory, BaseAggregator
 from cobra.core.distances.base import BaseDistance, DistanceFactory
 from cobra.core.estimators.base import BaseEstimator, EstimatorFactory
 from cobra.core.kernels.base import BaseKernel, KernelFactory
-from cobra.core.spaces.base import BaseSpaceProjector, SpaceProjectorFactory
-from cobra.core.splitters.base import SplitterFactory
 
 
 class CombineClassifier(ABC, SkBaseEstimator):
@@ -25,8 +22,6 @@ class CombineClassifier(ABC, SkBaseEstimator):
         self,
         estimators: List[Union[str, BaseEstimator]] | None = None,
         estimators_params: Dict[str, Any] | None = None,
-        splitter: str = "holdout",
-        splitter_params: Dict[str, Any] | None = None,
         distance: str = "hamming",
         distance_params: Dict[str, Any] | None = None,
         kernel: str = "indicator",
@@ -38,8 +33,6 @@ class CombineClassifier(ABC, SkBaseEstimator):
     
         self.estimators = estimators
         self.estimators_params = estimators_params
-        self.splitter = splitter
-        self.splitter_params = splitter_params
         self.distance = distance
         self.distance_params = distance_params
         self.kernel = kernel
@@ -47,34 +40,6 @@ class CombineClassifier(ABC, SkBaseEstimator):
         self.aggregator = aggregator
         self.aggregator_params = aggregator_params
         self.random_state = random_state
-
-    def _resolve_fit_split_context(self, X, y, X_l, y_l):
-        """
-        Returns: X_k, y_k, X_l, y_l, iloc_k, iloc_l, as_predictions
-            X_k, y_k: training set for base estimators
-            X_l, y_l: aggregation set for COBRA
-            iloc_k, iloc_l: indices of X_k, X_l in original X
-        """
-        X, y = check_X_y(X, y)
-        if X_l is not None and y_l is not None:
-            X_l, y_l = check_X_y(X_l, y_l)
-            X_k_, X_l_ = X, X_l
-            y_k_, y_l_ = y, y_l
-            iloc_l, iloc_k = np.arange(len(y_l_)), np.arange(len(y))
-            self.as_predictions_ = True
-        else:
-            split_params = dict(self.splitter_params or {})
-            split_params.setdefault("random_state", self.random_state)
-            splitter = SplitterFactory.create(
-                self.splitter,
-                **split_params
-            )
-            iloc_k, iloc_l = splitter.split(X, y)
-            X_k_, y_k_ = X[iloc_k], y[iloc_k]
-            X_l_, y_l_ = X[iloc_l], y[iloc_l]
-            self.as_predictions_ = False
-        
-        return X_k_, y_k_, X_l_, y_l_, iloc_k, iloc_l
 
     def _fit_estimators(self, X_k: np.ndarray, y_k: np.ndarray):
         """
@@ -110,78 +75,47 @@ class CombineClassifier(ABC, SkBaseEstimator):
         
         return machines
     
-    def _prediction_matrix(self, X: np.ndarray):
-        if self.as_predictions_:
-            return X
-        
+    def _prediction_matrix(self, X: np.ndarray):        
         cols = []
-        for est in self.base_estimators_:
-            cols.append(np.asarray(est.predict(X)).reshape(-1, 1))
-        return np.hstack(cols)
+        for est in self.estimators_:
+            preds = est.predict(X)
+            cols.append(preds)
+        return np.column_stack(cols)
     
-    def _space_projector(self, X, pred_matrix):
-        projector : BaseSpaceProjector = SpaceProjectorFactory.create("combine_classifier")
-        return projector.transform(X, pred_matrix)
-
-    def fit(
-        self,
-        X : np.ndarray,
-        y : np.ndarray,
-        X_l: np.ndarray | None = None,
-        y_l: np.ndarray | None = None,
-    ):
-        
-        # Resolve fit context
-        (
-            self.X_k_, self.y_k_,
-            self.X_l_, self.y_l_,
-            self.iloc_k_, self.iloc_l_,
-        ) = self._resolve_fit_split_context(X, y, X_l, y_l)
-
-        self.classes_ = np.unique(self.y_k_)
-
-        if not self.as_predictions_:
-            self.base_estimators_ = self._fit_estimators(self.X_k_, self.y_k_)
-            self.pred_l_ = self._prediction_matrix(self.X_l_)
-        else:
-            self.pred_l_ = self.X_l_
-        
-        # create distance, kernel, aggregator
+    def _resolve_components(self):
         self.distance_ : BaseDistance = DistanceFactory.create(
             self.distance,
             **(self.distance_params or {})
         )
+
         self.kernel_ : BaseKernel = KernelFactory.create(
             self.kernel,
-            **(self.kernel_params or {"alpha" : np.asarray([1.0])})
+            **(self.kernel_params or {})
         )
 
         self.aggregator_ : BaseAggregator = AggregatorFactory.create(
             self.aggregator,
             **(self.aggregator_params or {})
         )
+    
 
-        classes, counts = np.unique(self.y_k_, return_counts=True)
+    def fit(self, X : np.ndarray, y : np.ndarray):
+        self.classes_ = np.unique(y)
+        self.estimators_ = self._fit_estimators(X, y)
+        self.y_ = self._prediction_matrix(X)
+        classes, counts = np.unique(self.y_, return_counts=True)
         self.global_majority_class_ = classes[np.argmax(counts)]
 
-        # self.distance_matrix_ = self.distance_.matrix(self.pred_l_, self.y_l_)
-        # K = self.kernel_(self.distance_matrix_)
-        # np.fill_diagonal(K, 0.0)
-        self.z_l_ = self._space_projector(self.X_l_, self.pred_l_)
-
+        self._resolve_components()
         return self
 
     def predict(self, X):
-        check_is_fitted(self, ["z_l_", "distance_", "kernel_", "aggregator_"])
-
         X = check_array(X)
 
         preds = self._prediction_matrix(X)
-        z = self._space_projector(X, preds)
-
         outputs = []
 
-        D = self.distance_.matrix(z, self.z_l_)
+        D = self.distance_.matrix(preds, self.y_)
         K = self.kernel_(D)
 
         for i in range(K.shape[0]):
@@ -191,7 +125,7 @@ class CombineClassifier(ABC, SkBaseEstimator):
                 outputs.append(self.global_majority_class_)
                 continue
 
-            y_sub = self.y_l_[mask]
+            y_sub = self.y_[mask]
             w_sub = w[mask]
 
             outputs.append(
