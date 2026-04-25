@@ -210,6 +210,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             self.optimizer_ = SearchOptimizerFactory.create(
                 self.optimizer,
                 **(self.optimizer_params or {}),
+                param_grid={"bandwidth" : self.bandwidth_list or np.linspace(0.1, 10.0, 20)},
                 random_state=self.random_state
             )
             params, history = self.optimizer_(objective, self.bandwidth_list)

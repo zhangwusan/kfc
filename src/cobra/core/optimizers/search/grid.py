@@ -1,15 +1,16 @@
 import numpy as np
 from itertools import product
 
-from cobra.core.optimizers.search.base import BaseSearchOptimizer
+from cobra.core.optimizers.search.base import BaseSearchOptimizer, SearchOptimizerFactory
 
 
+@SearchOptimizerFactory.register("grid", "grid_search")
 class GridSearchOptimizer(BaseSearchOptimizer):
     """
     Exhaustive grid search optimizer.
     """
 
-    def __init__(self, param_grid: dict, verbose=False):
+    def __init__(self, param_grid: dict, verbose=False, **kwargs):
         self.param_grid = param_grid
         self.verbose = verbose
 
