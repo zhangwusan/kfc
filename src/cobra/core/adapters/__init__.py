@@ -9,8 +9,8 @@ by injecting tunable hyperparameters before kernel functions are applied.
 
 Pipeline position
 -----------------
-Input → Splitter → Estimators → Distance → Kernel Adapter
-→ Kernel → Optimize + Loss → Aggregation → Output
+Input -> Splitter -> Estimators -> Normalize Constants -> Distance
+-> Kernel Adapter -> Kernel -> Optimize + Loss -> Aggregation -> Output
 
 Main responsibilities
 ---------------------
