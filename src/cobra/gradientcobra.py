@@ -2,31 +2,23 @@ from __future__ import annotations
 
 from abc import ABC
 from typing import Any, List, Union
-from matplotlib.pyplot import flag
 import numpy as np
 
 from sklearn.base import RegressorMixin, BaseEstimator as SkBaseEstimator
-from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.utils.validation import check_X_y, check_is_fitted
 
-from cobra.core import (
-    AggregatorFactory,
-    DistanceFactory,
-    KernelFactory,
-)
-from cobra.core.aggregators.base import BaseAggregator
-from cobra.core.distances.base import BaseDistance
+from cobra.core.adapters.base import BaseKernelAdapter, KernelAdapterFactory
+from cobra.core.aggregators.base import AggregatorFactory, BaseAggregator
+from cobra.core.distances.base import BaseDistance, DistanceFactory
 from cobra.core.estimators.base import BaseEstimator, EstimatorFactory
-from cobra.core.kernels.base import BaseKernel
+from cobra.core.kernels.base import BaseKernel, KernelFactory
 from cobra.core.losses.base import BaseLoss, LossFactory
-from cobra.core.optimizers.base import BaseOptimizer, OptimizerFactory
-from cobra.core.spaces.base import BaseSpaceProjector, SpaceProjectorFactory
+from cobra.core.optimizers.gradient.base import GradientOptimizerFactory
+from cobra.core.optimizers.search.base import SearchOptimizerFactory
+from cobra.core.spaces.base import SpaceNormalizerFactory
 from cobra.core.splitters.base import BaseDataSplitter, SplitterFactory
 
-
 class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
-    """
-    GradientCOBRA
-    """
 
     def __init__(
         self,
@@ -38,13 +30,12 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         kernel_params: dict[str, Any] | None = None,
         aggregator: str = "weighted_mean",
         aggregator_params: dict[str, Any] | None = None,
-        splitter: str = "kfold",
-        splitter_params: dict[str, Any] | None = None,
         loss: str = "mse",
         loss_params: dict[str, Any] | None = None,
-        optimizer: str = "grad",
+        optimizer: str = "gradient_descent",
         optimizer_params: dict[str, Any] | None = None,
 
+        opt_method: str = "grad",
         bandwidth_list: np.ndarray | None = None,
         norm_constant = None,
         random_state: int | None = None
@@ -57,17 +48,16 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         self.kernel_params = kernel_params
         self.aggregator = aggregator
         self.aggregator_params = aggregator_params
-        self.splitter = splitter
-        self.splitter_params = splitter_params
         self.loss = loss
         self.loss_params = loss_params
         self.optimizer = optimizer
         self.optimizer_params = optimizer_params
 
-        self.norm_constant = norm_constant
         self.bandwidth_list = bandwidth_list
+        self.norm_constant = norm_constant
+        self.opt_method = opt_method
         self.random_state = random_state
-
+    
     def _resolve_fit_split_context(self, X, y, X_l, y_l):
         """
         Returns: X_k, y_k, X_l, y_l, iloc_k, iloc_l, as_predictions
@@ -96,7 +86,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             self.as_predictions_ = False
 
         return X_k_, y_k_, X_l_, y_l_, iloc_k, iloc_l
-
+    
     def _fit_estimators(self, X_k: np.ndarray, y_k: np.ndarray):
         """
         Build and fit base estimators.
@@ -133,100 +123,21 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         
         return machines
     
-    def _space_projector(self, X, pred_matrix):
-        projector : BaseSpaceProjector = SpaceProjectorFactory.create("gradientcobra")
-        return projector.transform(X, pred_matrix)
+    def _space_normalize(self, X, model_outputs):
+        normalizer = SpaceNormalizerFactory.create(
+            "gradientcobra",
+            norm_constant=self.norm_constant
+        )
+        return normalizer.transform(X, model_outputs)
     
-    def _prediction_matrix(self, X: np.ndarray):
-        if self.as_predictions_:
-            return X
-        
+    def _load_predictions(self, X):
         cols = []
-        for est in self.estimators_:
-            preds = est.predict(X)
+        for model in self.estimators_:
+            preds = model.predict(X)
             cols.append(preds)
-        
         return np.column_stack(cols)
     
-    def _optimize_hyperparameters(self):
-        self.distance_matrix_ = self.distance_.matrix(self.z_l_, self.z_l_)
-
-        folds = self.splitter_.split(self.X_l_, self.y_l_)
-        # update using kfold cv
-        def objective(params: np.ndarray) -> float:
-            # update kernel with current bandwidth
-            self.kernel_.set_params(alpha=params[0])
-            K = self.kernel_(self.distance_matrix_.copy())
-            n_samples = self.y_l_.shape[0]
-
-            preds = np.empty(n_samples, dtype=float)
-
-            for train_idx, val_idx in folds:
-                w = K[val_idx][:, train_idx]
-                y_train = self.y_l_[train_idx]
-
-                denom = w.sum(axis=1)
-
-                for i, v in enumerate(val_idx):
-                    if denom[i] < 1e-12:
-                        preds[v] = np.mean(y_train)
-                    else:
-                        preds[v] = self.aggregator_.aggregate(y_train, w[i])
-            
-            return self.loss_(self.y_l_, preds)
-
-        best, histories = self.optimizer_.optimize(objective=objective, initial_value=np.asarray([0.5]))
-
-        self.optimization_outputs_ = {
-            "method": self.optimizer,
-            "bandwidth": best,
-            "risk" : objective(best),
-            "histories" : histories
-        }
-    
-    def _resolve_norm_constant(self, y):
-        if self.estimators is None:
-            M = 6
-        else:
-            M = len(self.estimators)
-        if self.norm_constant is None:
-            self.norm_constant_ = 30 / (np.max(np.abs(y)) * M)
-        else:
-            self.norm_constant_ = self.norm_constant / (np.max(np.abs(y)) * M)
-
-    def fit(
-        self,
-        X : np.ndarray,
-        y : np.ndarray,
-        X_l : np.ndarray | None = None,
-        y_l : np.ndarray | None = None
-    ):
-        """
-        Fit GradientCOBRA model.
-
-        Parameters:
-            X, y: data to split into training/aggregation sets
-            X_l, y_l: optional pre-split aggregation set (bypasses splitting)
-        
-        Returns:
-            self
-        """
-        (
-            self.X_k_, self.y_k_,
-            self.X_l_, self.y_l_,
-            self.iloc_k_, self.iloc_l_
-        ) = self._resolve_fit_split_context(X, y, X_l, y_l)
-
-        self.estimators_ = self._fit_estimators(self.X_k_, self.y_k_)
-
-        self._resolve_norm_constant(y)
-
-        if not self.as_predictions_:
-            self.pred_l_ = self._prediction_matrix(self.X_l_)
-        else:
-            self.pred_l_ = self.X_l_
-
-        # resolve component
+    def _resolve_component(self):
         self.distance_ : BaseDistance = DistanceFactory.create(
             self.distance,
             **(self.distance_params or {})
@@ -247,42 +158,122 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
             **(self.loss_params or {})
         )
 
-        self.optimizer_ : BaseOptimizer = OptimizerFactory.create(
-            self.optimizer,
-            **(self.optimizer_params or {})
-        )
-
         self.splitter_ : BaseDataSplitter = SplitterFactory.create(
-            self.splitter,
-            **(self.splitter_params or {"random_state": self.random_state})
+            "kfold",
+            n_splits=5,
+            random_state=self.random_state
         )
 
-        self.z_l_ = self._space_projector(self.X_l_, self.pred_l_)
+        self.adapter_ : BaseKernelAdapter = KernelAdapterFactory.create(
+            "gradientcobra",
+            bandwidth=1.0
+        )
 
-        # optimize hyperparameters
+    def _optimize_hyperparameters(self):
+        self.distance_matrix_ = self.distance_.matrix(self.Y_l_norm_, self.Y_l_norm_)
+
+        folds = self.splitter_.split(self.X_l_, self.y_l_)
+
+        def objective(params):
+            # set bandwidth
+            self.adapter_.set_params(bandwidth=params[0])
+
+            D = self.adapter_.transform(self.distance_matrix_)
+            K = self.kernel_(D)
+
+            n_samples = len(self.y_l_)
+            preds = np.empty(n_samples, dtype=float)
+
+            for train_idx, val_idx in folds:
+                w = K[train_idx][:, train_idx]
+                y = self.y_l_[train_idx]
+
+                denom = np.sum(w, axis=1)
+
+                for i, v in enumerate(val_idx):
+                    if denom[i] > 0:
+                        preds[v] = self.aggregator_.aggregate(y, w[i])
+                    else:
+                        preds[v] = np.mean(y)
+                
+            return self.loss_(self.y_l_, preds)
+        
+        if self.opt_method == "grad":
+            self.optimizer_ = GradientOptimizerFactory.create(
+                self.optimizer,
+                **(self.optimizer_params or {}),
+                random_state=self.random_state
+            )
+            params, history = self.optimizer_(objective, np.array([1.0]))
+        
+        else:
+            self.optimizer_ = SearchOptimizerFactory.create(
+                self.optimizer,
+                **(self.optimizer_params or {}),
+                random_state=self.random_state
+            )
+            params, history = self.optimizer_(objective, self.bandwidth_list)
+
+        self.optimization_outputs_ = {
+            "method": self.opt_method,
+            "params": params,
+            "history": history
+        }   
+
+
+        
+    def fit(
+        self,
+        X : np.ndarray,
+        y : np.ndarray,
+        X_l : np.ndarray | None = None,
+        y_l : np.ndarray | None = None
+    ):
+        # split data into train and aggregation sets
+        (
+            self.X_k_, self.y_k_,
+            self.X_l_, self.y_l_,
+            self.iloc_k_, self.iloc_l_
+        ) = self._resolve_fit_split_context(X, y, X_l, y_l) 
+
+        # fit base estimators on training set
+        self.estimators_ = self._fit_estimators(self.X_k_, self.y_k_)
+
+        # load predictions on aggregation set
+        if not self.as_predictions_:
+            model_outputs = self._load_predictions(self.X_l_)
+        else:
+            model_outputs = self.X_l_
+
+        # normalize space
+        self.X_l_norm_, self.Y_l_norm_ = self._space_normalize(self.X_l_, model_outputs)
+
+        # resolve component
+        self._resolve_component()
+
         self._optimize_hyperparameters()
         return self
 
     def predict(self, X):
-        """
-        Prediction
-        """
-        check_is_fitted(self, ["z_l_", "distance_", "kernel_", "aggregator_"])
-        X = check_array(X)
-        pred_x = self._prediction_matrix(X)
-        z_x = self._space_projector(X, pred_x)
+        check_is_fitted(self)
 
-        D = self.distance_.matrix(z_x, self.z_l_)
+        model_outputs = self._load_predictions(X)
+        X_norm, Y_norm = self._space_normalize(X, model_outputs)
+
+        distance_matrix = self.distance_.matrix(Y_norm, self.Y_l_norm_)
+        D = self.adapter_.transform(distance_matrix)
         K = self.kernel_(D)
 
-        outputs = np.empty(K.shape[0], dtype=float)
+        n_samples = len(X)
+        preds = np.empty(n_samples, dtype=float)
 
-        for i in range(K.shape[0]):
+        for i in range(n_samples):
             w = K[i]
-            if np.allclose(w.sum(), 0.0):
-                outputs[i] = np.mean(self.y_l_)
-            else:
-                outputs[i] = self.aggregator_.aggregate(self.y_l_, w)
+            denom = np.sum(w)
 
-        return outputs
-    
+            if denom > 0:
+                preds[i] = self.aggregator_.aggregate(self.y_l_, w)
+            else:
+                preds[i] = np.mean(self.y_l_)
+        
+        return preds

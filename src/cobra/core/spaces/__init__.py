@@ -1,12 +1,12 @@
 """Consensus-space projectors for COBRA and MIXCOBRA style pipelines."""
 
-from .base import BaseSpaceProjector
-from .base import SpaceProjectorFactory
-from .builtin import MixCOBRASpaceProjector, PredictionOnlyProjector
+from .base import BaseSpaceNormalizer, SpaceNormalizerFactory
+from .builtin import IdentitySpaceNormalizer, GradientCOBRASpaceNormalizer, MixCOBRASpaceNormalizer
 
 __all__ = [
-	"BaseSpaceProjector",
-	"SpaceProjectorFactory",
-	"PredictionOnlyProjector",
-	"MixCOBRASpaceProjector",
+	"BaseSpaceNormalizer",
+	"SpaceNormalizerFactory",
+	"IdentitySpaceNormalizer",
+	"GradientCOBRASpaceNormalizer",
+	"MixCOBRASpaceNormalizer"
 ]

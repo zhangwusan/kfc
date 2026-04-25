@@ -21,6 +21,14 @@ class BaseOptimizer(ABC):
     along with optimization history or metadata.
     """
 
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+    
+    def __repr__(self):
+        attrs = { k: v for k, v in self.__dict__.items() if not k.startswith("_") and not callable(v) }
+        return f"{self.__class__.__name__}({attrs})"
+
     @abstractmethod
     def __call__(
         self,
