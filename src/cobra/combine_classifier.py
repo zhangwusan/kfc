@@ -1,8 +1,96 @@
 """
 CombineClassifier
+
+A COBRA-style ensemble classifier that combines multiple base estimators
+using distance-based consensus and kernel-weighted aggregation.
+
+Pipeline position
+-----------------
+Input -> Splitter -> Estimators -> Normalize Constants -> Distance
+-> Kernel Adapter -> Kernel -> Optimize + Loss -> Aggregation -> Output
+
+Overview
+--------
+CombineClassifier builds an ensemble of heterogeneous base estimators,
+then uses their prediction space to compute similarity between samples.
+Final predictions are obtained through kernel-weighted aggregation
+over neighbor predictions.
+
+Core idea
+---------
+Instead of relying on a single model, CombineClassifier:
+
+1. trains multiple base estimators (expert pool)
+2. collects their prediction matrix
+3. computes distances in prediction space
+4. transforms distances into weights via a kernel
+5. aggregates weighted neighbor outputs into final prediction
+
+This implements a COBRA-style consensus mechanism.
+
+Design goals
+------------
+- model-agnostic ensemble construction
+- flexible estimator injection (string or object)
+- pluggable distance, kernel, and aggregation strategies
+- support for heterogeneous model pools
+- robust fallback to global majority class
+- sklearn-compatible API (fit/predict)
+
+Main components
+---------------
+
+Estimators
+^^^^^^^^^^
+Base learners used as ensemble members.
+Examples: logistic regression, random forest, SVM, KNN.
+
+Distance
+^^^^^^^^
+Measures similarity between prediction vectors.
+
+Kernel
+^^^^^^
+Transforms distances into weights (indicator, RBF, Laplace, etc.).
+
+Aggregator
+^^^^^^^^^^
+Combines weighted predictions into final output.
+
+Behavior summary
+---------------
+- During ``fit``:
+    - estimators are trained
+    - prediction matrix is stored
+    - global majority class is computed
+    - core components are initialized
+
+- During ``predict``:
+    - prediction matrix is recomputed for test data
+    - distances are computed in prediction space
+    - kernel produces similarity weights
+    - aggregator computes final label per sample
+
+Fallback strategy
+-----------------
+If no valid neighbors are found for a sample:
+→ returns global majority class
+
+Examples
+--------
+>>> model = CombineClassifier(
+...     estimators=["svm", "random_forest"],
+...     kernel="rbf",
+...     distance="hamming",
+...     aggregator="majority_vote"
+... )
+
+>>> model.fit(X_train, y_train)
+>>> y_pred = model.predict(X_test)
 """
 
 from __future__ import annotations
+
 from abc import ABC
 from typing import Any, Dict, List, Union
 
@@ -17,6 +105,29 @@ from cobra.core.kernels.base import BaseKernel, KernelFactory
 
 
 class CombineClassifier(ABC, SkBaseEstimator):
+    """
+    COBRA-style ensemble classifier.
+
+    Parameters
+    ----------
+    estimators : list[str | BaseEstimator] | None
+        Base learners used in the ensemble.
+
+    estimators_params : dict[str, Any] | None
+        Parameter dictionary per estimator.
+
+    distance : str
+        Distance metric in prediction space.
+
+    kernel : str
+        Kernel function to convert distances into weights.
+
+    aggregator : str
+        Aggregation rule for weighted predictions.
+
+    random_state : int | None
+        Random seed (reserved for reproducibility).
+    """
 
     def __init__(
         self,
@@ -30,7 +141,6 @@ class CombineClassifier(ABC, SkBaseEstimator):
         aggregator_params: Dict[str, Any] | None = None,
         random_state: int | None = None,
     ):
-    
         self.estimators = estimators
         self.estimators_params = estimators_params
         self.distance = distance
@@ -43,9 +153,13 @@ class CombineClassifier(ABC, SkBaseEstimator):
 
     def _fit_estimators(self, X_k: np.ndarray, y_k: np.ndarray):
         """
-        Build and fit base estimators.
-        """
+        Train base estimators.
 
+        Returns
+        -------
+        list[BaseEstimator]
+            Fitted estimator pool.
+        """
         default_estimators = [
             "logistic_regression",
             "random_forest",
@@ -54,7 +168,6 @@ class CombineClassifier(ABC, SkBaseEstimator):
         ]
 
         estimators = self.estimators or default_estimators
-
         machines = []
 
         for est in estimators:
@@ -72,37 +185,54 @@ class CombineClassifier(ABC, SkBaseEstimator):
 
             model.fit(X_k, y_k)
             machines.append(model)
-        
+
         return machines
-    
-    def _prediction_matrix(self, X: np.ndarray):        
+
+    def _prediction_matrix(self, X: np.ndarray):
+        """
+        Construct prediction matrix from estimator pool.
+
+        Returns
+        -------
+        np.ndarray
+            Shape: (n_samples, n_estimators)
+        """
         cols = []
         for est in self.estimators_:
             preds = est.predict(X)
             cols.append(preds)
         return np.column_stack(cols)
-    
+
     def _resolve_components(self):
-        self.distance_ : BaseDistance = DistanceFactory.create(
+        """Initialize distance, kernel, and aggregator components."""
+        self.distance_: BaseDistance = DistanceFactory.create(
             self.distance,
-            **(self.distance_params or {})
+            **(self.distance_params or {}),
         )
 
-        self.kernel_ : BaseKernel = KernelFactory.create(
+        self.kernel_: BaseKernel = KernelFactory.create(
             self.kernel,
-            **(self.kernel_params or {})
+            **(self.kernel_params or {}),
         )
 
-        self.aggregator_ : BaseAggregator = AggregatorFactory.create(
+        self.aggregator_: BaseAggregator = AggregatorFactory.create(
             self.aggregator,
-            **(self.aggregator_params or {})
+            **(self.aggregator_params or {}),
         )
-    
 
-    def fit(self, X : np.ndarray, y : np.ndarray):
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """
+        Fit ensemble and prepare consensus space.
+
+        Returns
+        -------
+        self
+        """
         self.classes_ = np.unique(y)
+
         self.estimators_ = self._fit_estimators(X, y)
         self.y_ = self._prediction_matrix(X)
+
         classes, counts = np.unique(self.y_, return_counts=True)
         self.global_majority_class_ = classes[np.argmax(counts)]
 
@@ -110,6 +240,14 @@ class CombineClassifier(ABC, SkBaseEstimator):
         return self
 
     def predict(self, X):
+        """
+        Predict using kernel-weighted consensus aggregation.
+
+        Returns
+        -------
+        np.ndarray
+            Predicted labels.
+        """
         X = check_array(X)
 
         preds = self._prediction_matrix(X)
@@ -121,6 +259,7 @@ class CombineClassifier(ABC, SkBaseEstimator):
         for i in range(K.shape[0]):
             w = K[i]
             mask = w > 0
+
             if not np.any(mask):
                 outputs.append(self.global_majority_class_)
                 continue

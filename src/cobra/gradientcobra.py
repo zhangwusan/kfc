@@ -1,3 +1,65 @@
+"""
+GradientCOBRA
+
+A gradient-optimized extension of the COBRA framework for consensus-based
+regression using kernel-weighted aggregation in a learned prediction space.
+
+Pipeline position
+-----------------
+Input -> Splitter -> Estimators -> Normalize Constants -> Distance
+-> Kernel Adapter -> Kernel -> Optimize + Loss -> Aggregation -> Output
+
+Overview
+--------
+GradientCOBRA extends classical COBRA by introducing:
+
+- differentiable/optimizable kernel bandwidth
+- gradient-based or search-based hyperparameter tuning
+- normalized prediction space alignment
+- cross-validated loss-driven calibration
+
+Core idea
+---------
+Instead of fixed kernel bandwidth, GradientCOBRA learns optimal
+smoothing parameters by minimizing a validation loss over:
+
+- estimator prediction space
+- kernel-induced similarity graph
+- aggregation-based reconstruction error
+
+This enables adaptive consensus formation.
+
+Design goals
+------------
+- optimize kernel behavior (bandwidth tuning)
+- support gradient + grid-based optimization
+- unify estimator + kernel + loss pipeline
+- support direct (X_l, y_l) or internal split mode
+- maintain sklearn-compatible API
+
+Key components
+--------------
+- Estimators: base prediction models
+- Distance: similarity in prediction space
+- Kernel: converts distances → weights
+- Kernel Adapter: parameterized transformation layer
+- Aggregator: weighted consensus function
+- Loss: optimization objective
+- Optimizer: gradient or search-based tuning
+- Splitter: train/aggregation partitioning
+- Space Normalizer: stabilizes representation scale
+
+Optimization modes
+-------------------
+1. Gradient-based (`opt_method="grad"`)
+   - numerical gradient descent
+   - continuous bandwidth tuning
+
+2. Search-based (`opt_method="search"`)
+   - grid or random search
+   - discrete parameter evaluation
+
+"""
 from __future__ import annotations
 
 from abc import ABC
@@ -19,6 +81,46 @@ from cobra.core.spaces.base import SpaceNormalizerFactory
 from cobra.core.splitters.base import BaseDataSplitter, SplitterFactory
 
 class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
+    """
+    Gradient-optimized COBRA regressor.
+
+    Parameters
+    ----------
+    estimators : list[str | BaseEstimator] | None
+        Base estimators forming the expert pool.
+
+    estimators_params : dict[str, Any] | None
+        Hyperparameters per estimator.
+
+    distance : str
+        Distance metric for prediction space.
+
+    kernel : str
+        Kernel function for weight computation.
+
+    aggregator : str
+        Aggregation strategy for weighted outputs.
+
+    loss : str
+        Loss function for optimization.
+
+    optimizer : str
+        Optimization method for kernel parameters.
+
+    opt_method : str
+        Optimization strategy:
+        - "grad" → gradient-based
+        - "search" → grid/search-based
+
+    bandwidth_list : np.ndarray | None
+        Search space for kernel bandwidth (if search mode).
+
+    norm_constant : float | None
+        Normalization constant for space scaling.
+
+    random_state : int | None
+        Reproducibility seed.
+    """
 
     def __init__(
         self,
@@ -60,10 +162,14 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
     
     def _resolve_fit_split_context(self, X, y, X_l, y_l):
         """
-        Returns: X_k, y_k, X_l, y_l, iloc_k, iloc_l, as_predictions
-            X_k, y_k: training set for base estimators
-            X_l, y_l: aggregation set for COBRA
-            iloc_k, iloc_l: indices of X_k, X_l in original X
+        Build training and aggregation datasets.
+
+        Returns
+        -------
+        tuple
+            X_k, y_k : training set
+            X_l, y_l : aggregation set
+            iloc_k, iloc_l : indices
         """
         X, y = check_X_y(X, y)
         if X_l is not None and y_l is not None:
@@ -89,7 +195,7 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
     
     def _fit_estimators(self, X_k: np.ndarray, y_k: np.ndarray):
         """
-        Build and fit base estimators.
+        Fit base estimator pool.
         """
 
         default_estimators = [
@@ -124,6 +230,9 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         return machines
     
     def _space_normalize(self, X, model_outputs):
+        """
+        Normalize estimator prediction space.
+        """
         normalizer = SpaceNormalizerFactory.create(
             "gradientcobra",
             norm_constant=self.norm_constant
@@ -131,6 +240,9 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         return normalizer.transform(X, model_outputs)
     
     def _load_predictions(self, X):
+        """
+        Build prediction matrix from estimator pool.
+        """
         cols = []
         for model in self.estimators_:
             preds = model.predict(X)
@@ -138,6 +250,9 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         return np.column_stack(cols)
     
     def _resolve_component(self):
+        """
+        Initialize COBRA components (distance, kernel, aggregator, loss, adapter).
+        """
         self.distance_ : BaseDistance = DistanceFactory.create(
             self.distance,
             **(self.distance_params or {})
@@ -170,6 +285,13 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         )
 
     def _optimize_hyperparameters(self):
+        """
+        Optimize kernel bandwidth using selected strategy.
+
+        Supports:
+        - gradient descent
+        - grid/search optimization
+        """
         self.distance_matrix_ = self.distance_.matrix(self.Y_l_norm_, self.Y_l_norm_)
 
         folds = self.splitter_.split(self.X_l_, self.y_l_)
@@ -230,6 +352,18 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         X_l : np.ndarray | None = None,
         y_l : np.ndarray | None = None
     ):
+        """
+        Fit GradientCOBRA model.
+
+        Workflow
+        --------
+        1. Split dataset
+        2. Train estimators
+        3. Build prediction space
+        4. Normalize space
+        5. Initialize components
+        6. Optimize parameters
+        """
         # split data into train and aggregation sets
         (
             self.X_k_, self.y_k_,
@@ -256,6 +390,14 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         return self
 
     def predict(self, X):
+        """
+        Predict using optimized consensus model.
+
+        Returns
+        -------
+        np.ndarray
+            Predicted regression values.
+        """
         check_is_fitted(self)
 
         model_outputs = self._load_predictions(X)

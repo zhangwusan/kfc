@@ -1,5 +1,17 @@
-"""MixCOBRA implementation built on modular core components."""
+"""
+MixCOBRA implementation built on modular core components.
 
+This class implements the MixCOBRA regression framework, which combines:
+- multiple base estimators (expert pool)
+- distance-based similarity in joint input/output space
+- kernel weighting
+- aggregation of neighbor targets
+- hyperparameter optimization over mixing coefficients (alpha, beta)
+
+Pipeline:
+    Input -> Split -> Estimators -> Normalize -> Distance (X, Y)
+    -> Kernel Adapter -> Kernel -> Optimization -> Aggregation -> Output
+"""
 from __future__ import annotations
 
 from abc import ABC
@@ -14,7 +26,6 @@ from cobra.core.distances.base import BaseDistance, DistanceFactory
 from cobra.core.estimators.base import BaseEstimator, EstimatorFactory
 from cobra.core.kernels.base import BaseKernel, KernelFactory
 from cobra.core.losses.base import BaseLoss, LossFactory
-from cobra.core.optimizers.base import BaseOptimizer
 from cobra.core.optimizers.gradient.base import BaseGradientOptimizer, GradientOptimizerFactory
 from cobra.core.optimizers.search.base import BaseSearchOptimizer, SearchOptimizerFactory
 from cobra.core.spaces.base import SpaceNormalizerFactory
@@ -23,6 +34,47 @@ from cobra.core.splitters.base import BaseDataSplitter, SplitterFactory
 class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 	"""
 	MixCOBRARegressor
+
+	A consensus-based regression model that learns optimal similarity
+	weights between samples using both input-space and output-space distances.
+
+	Core idea:
+	    - Train multiple base estimators
+	    - Generate prediction matrix
+	    - Compare similarity in feature + prediction space
+	    - Learn mixing weights (alpha, beta)
+	    - Aggregate neighbors using kernel-weighted voting
+
+	Parameters
+	----------
+	estimators : list[str | BaseEstimator], optional
+	    Base models used in ensemble pool.
+	estimators_params : dict[str, Any], optional
+	    Hyperparameters for each estimator.
+	distance : str
+	    Distance metric for similarity computation.
+	kernel : str
+	    Kernel function to transform distances into weights.
+	aggregator : str
+	    Strategy to combine neighbor predictions.
+	loss : str
+	    Loss function used for optimization.
+	optimizer : str
+	    Optimization strategy (gradient or search).
+	alpha_list : np.ndarray, optional
+	    Candidate values for alpha (input-space weight).
+	beta_list : np.ndarray, optional
+	    Candidate values for beta (output-space weight).
+	norm_constant_x : float, optional
+	    Normalization constant for input space.
+	norm_constant_y : float, optional
+	    Normalization constant for output space.
+	opt_method : str
+	    Optimization method ("grad" or "grid/search").
+	one_parameter : bool
+	    If True, only optimize alpha (beta fixed to 0).
+	random_state : int, optional
+	    Random seed.
 	"""
 	def __init__(
 		self,
@@ -47,6 +99,10 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		one_parameter: bool = False,
 		random_state: int | None = None
 	):
+		"""
+		Initialize MixCOBRA model and store configuration.
+		"""
+
 		self.estimators = estimators
 		self.estimators_params = estimators_params
 		self.distance = distance
@@ -71,10 +127,18 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 	
 	def _resolve_fit_split_context(self, X, y, X_l, y_l, pred_features=None):
 		"""
-		Returns: X_k, y_k, X_l, y_l, iloc_k, iloc_l, as_predictions
-			X_k, y_k: training set for base estimators
-			X_l, y_l: aggregation set for COBRA
-			iloc_k, iloc_l: indices of X_k, X_l in original X
+		Prepare training and calibration split.
+
+		Supports three modes:
+		1. External calibration set (X_l, y_l provided)
+		2. Prediction-feature mode (pred_features provided)
+		3. Automatic split using SplitOverlap strategy
+
+		Returns
+		-------
+		X_k, y_k : training data
+		X_l, y_l : calibration data
+		iloc_k, iloc_l : indices in original dataset
 		"""
 		X, y = check_X_y(X, y)
 		if X_l is not None and y_l is not None:
@@ -107,7 +171,12 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 	
 	def _fit_estimators(self, X_k: np.ndarray, y_k: np.ndarray):
 		"""
-		Build and fit base estimators.
+		Fit base estimator pool on training data.
+
+		Returns
+		-------
+		list[BaseEstimator]
+		    Trained models
 		"""
 
 		default_estimators = [
@@ -142,6 +211,14 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		return machines
 
 	def _load_predictions(self, X: np.ndarray):
+		"""
+		Generate prediction matrix from all base estimators.
+
+		Returns
+		-------
+		np.ndarray
+		    Shape (n_samples, n_estimators)
+		"""
 		cols = []
 		for est in self.estimators_:
 			preds = est.predict(X)
@@ -149,6 +226,13 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		return np.column_stack(cols)
 
 	def _space_normalize(self, X, model_outputs):
+		"""
+		Normalize input and output spaces before distance computation.
+
+		Returns
+		-------
+		X_norm, Y_norm
+		"""
 		normalizer = SpaceNormalizerFactory.create(
 			"mixcobra",
 			norm_constant_x=self.norm_constant_x,
@@ -157,6 +241,15 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		return normalizer.transform(X, model_outputs)
 
 	def _resolve_component(self):
+		"""
+		Instantiate all modular components:
+		- distance
+		- kernel
+		- aggregator
+		- loss
+		- splitter
+		- kernel adapter
+		"""
 		self.distance_ : BaseDistance = DistanceFactory.create(
 			self.distance,
 			**(self.distance_params or {})
@@ -186,6 +279,14 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		)
 	
 	def objective_1d(self, params):
+		"""
+		Objective function for 1D optimization (alpha only).
+
+		Returns
+		-------
+		float
+		    Loss value
+		"""
 		alpha = params[0]
 		beta = 0.0
 		self.adapter_.set_params(alpha=alpha, beta=beta)
@@ -211,6 +312,14 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		return self.loss_(self.y_l_, preds)
 
 	def objective_2d(self, params):
+		"""
+		Objective function for 2D optimization (alpha, beta).
+
+		Returns
+		-------
+		float
+		    Loss value
+		"""
 		alpha, beta = params
 		self.adapter_.set_params(alpha=alpha, beta=beta)
 		dist_input = self.distance_.matrix(self.X_l_norm_, self.X_l_norm_)
@@ -235,6 +344,13 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 
 
 	def _optimize_hyperparameters(self):
+		"""
+		Run hyperparameter optimization using:
+		- gradient descent OR
+		- grid search
+
+		Optimizes alpha/beta mixing between distance spaces.
+		"""
 		if self.opt_method == "grad":
 			self.optimizer_ : BaseGradientOptimizer = GradientOptimizerFactory.create(
 				self.optimizer,
@@ -279,6 +395,21 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		y_l: np.ndarray | None = None,
 		pred_features: np.ndarray | None = None
 	):
+		"""
+		Fit MixCOBRA model.
+
+		Steps:
+		1. Split dataset
+		2. Train base estimators
+		3. Build prediction matrix
+		4. Normalize spaces
+		5. Initialize components
+		6. Optimize hyperparameters
+
+		Returns
+		-------
+		self
+		"""
 		
 		(
 			self.X_k_, self.y_k_,
@@ -313,6 +444,22 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		beta: float | None = None,
 		bandwidth: float | None = None
 	) -> np.ndarray:
+		"""
+		Predict target values for input samples.
+
+		Steps:
+		1. Generate estimator predictions
+		2. Normalize spaces
+		3. Compute distance matrices
+		4. Apply kernel weighting
+		5. Aggregate neighbors
+
+		Returns
+		-------
+		np.ndarray
+		    Predicted values
+		"""
+		
 		check_is_fitted(self)
 		X = check_array(X)
 
