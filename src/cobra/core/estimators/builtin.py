@@ -1,25 +1,38 @@
 """
 Estimator wrappers for COBRA-style expert pools.
 
-This module provides a unified interface over scikit-learn regressors,
-allowing them to be used interchangeably inside ensemble frameworks
-such as COBRA, GradientCOBRA, and MixCOBRA.
+This module provides a unified estimator layer used in COBRA-based
+ensemble systems such as GradientCOBRA and MixCOBRA.
 
-Design goals:
-- unify estimator interface
-- ensure factory-based instantiation
-- remove boilerplate duplication
-- allow flexible hyperparameter passing
+It standardizes scikit-learn models under a single interface so they
+can be:
+
+- registered via a factory
+- swapped dynamically in pipelines
+- used consistently in ensemble expert pools
+
+Pipeline position
+-----------------
+Input -> Splitter -> Estimators -> Normalize Constants -> Distance
+-> Kernel Adapter -> Kernel -> Optimize + Loss -> Aggregation -> Output
+
+Design goals
+------------
+- unify estimator interface across models
+- support factory-based instantiation
+- reduce boilerplate for sklearn models
+- enable hyperparameter injection via constructors
+- ensure compatibility with ensemble aggregation systems
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 from numpy.typing import ArrayLike
 
 import numpy as np
-from sklearn.base import BaseEstimator as SkBaseEstimator
 
+from sklearn.base import BaseEstimator as SkBaseEstimator
 from sklearn.dummy import DummyRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge, Lasso
 from sklearn.neighbors import KNeighborsRegressor
@@ -29,17 +42,32 @@ from sklearn.tree import DecisionTreeRegressor
 
 from .base import BaseEstimator, EstimatorFactory
 
+
 class SklearnEstimator(BaseEstimator):
     """
-    Generic wrapper for any scikit-learn regressor.
+    Generic wrapper for scikit-learn estimators.
 
-    This class standardizes the fit/predict interface so that all
-    estimators can be used inside COBRA-style ensembles.
+    This class adapts any sklearn-compatible model to the COBRA
+    estimator interface.
+
+    It ensures consistent behavior across all expert models used
+    in the ensemble pool.
 
     Parameters
     ----------
-    estimator:
-        A scikit-learn compatible regressor instance.
+    estimator : SkBaseEstimator
+        Any scikit-learn compatible estimator instance.
+
+    Notes
+    -----
+    This wrapper assumes the underlying estimator follows sklearn's
+    fit/predict API.
+
+    Examples
+    --------
+    >>> wrapper = SklearnEstimator(LinearRegression())
+    >>> wrapper.fit(X, y)
+    >>> preds = wrapper.predict(X_test)
     """
 
     def __init__(self, estimator: SkBaseEstimator) -> None:
@@ -47,18 +75,20 @@ class SklearnEstimator(BaseEstimator):
 
     def fit(self, x: ArrayLike, y: ArrayLike) -> "SklearnEstimator":
         """
-        Fit underlying estimator.
+        Fit the underlying estimator.
 
         Parameters
         ----------
         x : ArrayLike
             Training features.
+
         y : ArrayLike
             Target values.
 
         Returns
         -------
-        self
+        SklearnEstimator
+            Fitted estimator (self).
         """
         self.estimator.fit(x, y)
         return self
@@ -67,35 +97,58 @@ class SklearnEstimator(BaseEstimator):
         """
         Generate predictions.
 
+        Parameters
+        ----------
+        x : ArrayLike
+            Input features.
+
         Returns
         -------
         np.ndarray
-            Predicted values.
+            Predicted values as float array.
         """
         return np.asarray(self.estimator.predict(x), dtype=float)
 
     def predict_proba(self, x: ArrayLike) -> np.ndarray:
         """
-        Generate class probabilities if supported.
+        Return class probabilities (if supported).
+
+        Parameters
+        ----------
+        x : ArrayLike
+            Input features.
 
         Returns
         -------
         np.ndarray
-            Predicted probabilities.
+            Probability estimates.
+
+        Raises
+        ------
+        NotImplementedError
+            If estimator does not support probability prediction.
         """
         if hasattr(self.estimator, "predict_proba"):
             return np.asarray(self.estimator.predict_proba(x), dtype=float)
-        else:
-            raise NotImplementedError(
-                f"{self.estimator.__class__.__name__} does not support predict_proba."
-            )
+
+        raise NotImplementedError(
+            f"{self.estimator.__class__.__name__} "
+            "does not support predict_proba."
+        )
+
 
 @EstimatorFactory.register("mean_regressor", "dummy_mean")
 class MeanRegressor(BaseEstimator):
     """
-    Baseline model predicting the mean of training targets.
+    Mean baseline regressor.
 
-    Useful as a sanity check or weak baseline inside ensemble pools.
+    Predicts the average value of training targets regardless of input.
+
+    This serves as a simple sanity-check baseline inside expert pools.
+
+    Notes
+    -----
+    Useful for debugging and baseline comparison.
     """
 
     def __init__(self) -> None:
@@ -107,60 +160,75 @@ class MeanRegressor(BaseEstimator):
 
     def predict(self, x: ArrayLike) -> np.ndarray:
         return np.asarray(self.estimator.predict(x), dtype=float)
-    
+
+
 @EstimatorFactory.register("linear")
 class LinearRegressorEstimator(SklearnEstimator):
     """
-    Ordinary Least Squares Linear Regression.
+    Linear regression estimator.
 
-    Captures linear relationships between features and target.
+    Models a linear relationship between input features and target.
+
+    Useful as a fast and interpretable baseline model.
     """
 
     def __init__(self) -> None:
         super().__init__(LinearRegression())
 
+
 @EstimatorFactory.register("ridge")
 class RidgeRegressorEstimator(SklearnEstimator):
     """
-    Ridge regression with L2 regularization.
+    Ridge regression estimator (L2 regularization).
 
-    Helps stabilize solutions under multicollinearity.
+    Reduces overfitting by penalizing large coefficients.
     """
 
     def __init__(self, alpha: float = 1.0) -> None:
         super().__init__(Ridge(alpha=alpha))
 
+
 @EstimatorFactory.register("lasso")
 class LassoRegressorEstimator(SklearnEstimator):
     """
-    Lasso regression with L1 regularization.
+    Lasso regression estimator (L1 regularization).
 
-    Performs feature selection by driving some coefficients to zero.
+    Encourages sparsity by driving some coefficients to zero,
+    effectively performing feature selection.
     """
 
     def __init__(self, alpha: float = 1.0) -> None:
         super().__init__(Lasso(alpha=alpha))
 
+
 @EstimatorFactory.register("knn")
 class KNNRegressorEstimator(SklearnEstimator):
     """
-    K-Nearest Neighbors regression.
+    K-Nearest Neighbors regressor.
 
-    Non-parametric model based on local similarity.
+    Non-parametric model that predicts based on local similarity
+    in feature space.
     """
 
     def __init__(self, n_neighbors: int = 7) -> None:
         super().__init__(KNeighborsRegressor(n_neighbors=n_neighbors))
 
+
 @EstimatorFactory.register("random_forest")
 class RandomForestRegressorEstimator(SklearnEstimator):
     """
-    Random Forest regression.
+    Random Forest regressor.
 
-    Ensemble of decision trees for robust nonlinear modeling.
+    Ensemble of decision trees trained on bootstrapped samples.
+
+    Captures nonlinear relationships and interactions robustly.
     """
 
-    def __init__(self, n_estimators: int = 100, random_state: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        n_estimators: int = 100,
+        random_state: Optional[int] = None,
+    ) -> None:
         super().__init__(
             RandomForestRegressor(
                 n_estimators=n_estimators,
@@ -168,51 +236,75 @@ class RandomForestRegressorEstimator(SklearnEstimator):
             )
         )
 
+
 @EstimatorFactory.register("svm")
 class SVMRegressorEstimator(SklearnEstimator):
     """
-    Support Vector Regression with RBF kernel.
+    Support Vector Regression (SVR).
 
-    Effective for high-dimensional nonlinear regression tasks.
+    Uses kernel methods (RBF kernel by default) to model
+    nonlinear relationships in data.
     """
 
     def __init__(self, C: float = 5.0, epsilon: float = 0.05) -> None:
-        super().__init__(SVR(C=C, epsilon=epsilon, kernel="rbf"))
+        super().__init__(
+            SVR(C=C, epsilon=epsilon, kernel="rbf")
+        )
+
 
 @EstimatorFactory.register("logistic_regression")
 class LogisticRegressionEstimator(SklearnEstimator):
     """
-    Logistic Regression for regression tasks.
+    Logistic regression estimator.
 
-    Although primarily a classifier, it can be used in regression settings
-    by treating the output as a continuous score.
+    Primarily a classification model, but used here as a
+    probabilistic scoring estimator in ensemble settings.
     """
 
-    def __init__(self, max_iter: int = 5000, random_state: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        max_iter: int = 5000,
+        random_state: Optional[int] = None,
+    ) -> None:
         super().__init__(
-            LogisticRegression(max_iter=max_iter, random_state=random_state)
+            LogisticRegression(
+                max_iter=max_iter,
+                random_state=random_state,
+            )
         )
-    
+
+
 @EstimatorFactory.register("decision_tree")
 class DecisionTreeRegressorEstimator(SklearnEstimator):
     """
-    Decision Tree regression.
+    Decision tree regressor.
 
-    Simple tree-based model that captures nonlinear relationships.
+    Simple nonlinear model based on hierarchical feature splits.
     """
 
-    def __init__(self, max_depth: Optional[int] = None, random_state: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        max_depth: Optional[int] = None,
+        random_state: Optional[int] = None,
+    ) -> None:
         super().__init__(
-            DecisionTreeRegressor(max_depth=max_depth, random_state=random_state)
+            DecisionTreeRegressor(
+                max_depth=max_depth,
+                random_state=random_state,
+            )
         )
+
 
 @EstimatorFactory.register("gradient_boosting")
 class GradientBoostingRegressorEstimator(SklearnEstimator):
     """
-    Gradient Boosting regression.
+    Gradient boosting regressor.
 
-    Ensemble of weak learners (e.g., decision trees) trained sequentially.
+    Sequential ensemble of weak learners trained to reduce error.
+
+    Typically provides strong performance on structured data.
     """
+
     def __init__(
         self,
         n_estimators: int = 100,
