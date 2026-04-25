@@ -5,7 +5,7 @@ Normalized spaces
 from __future__ import annotations
 
 from cobra.core.spaces.base import BaseSpaceNormalizer, SpaceNormalizerFactory
-from docs.cobra.core._utils import compute_normalize_constant
+from cobra.utils.preprocessing import compute_normalization_constant
 
 @SpaceNormalizerFactory.register("identity")
 class IdentitySpaceNormalizer(BaseSpaceNormalizer):
@@ -19,7 +19,7 @@ class GradientCOBRASpaceNormalizer(BaseSpaceNormalizer):
 
     def transform(self, X, model_outputs):
         M = model_outputs.shape[1]
-        normalize_constant = compute_normalize_constant(
+        normalize_constant = compute_normalization_constant(
             model_outputs,
             self.norm_constant,
             scale_factor=30.0,
@@ -38,13 +38,13 @@ class MixCOBRASpaceNormalizer(BaseSpaceNormalizer):
 
     def transform(self, X, model_outputs):
         M = model_outputs.shape[1]
-        normalize_constant_x = compute_normalize_constant(
+        normalize_constant_x = compute_normalization_constant(
             X,
             self.norm_constant_x,
             scale_factor=30.0,
             M=M
         )
-        normalize_constant_y = compute_normalize_constant(
+        normalize_constant_y = compute_normalization_constant(
             model_outputs,
             self.norm_constant_y,
             scale_factor=30.0,
