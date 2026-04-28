@@ -222,11 +222,32 @@ class CombineClassifier(ABC, SkBaseEstimator):
 
     def fit(self, X: np.ndarray, y: np.ndarray):
         """
-        Fit ensemble and prepare consensus space.
+        Fit the ensemble classifier and build consensus space.
+
+        This method:
+
+        1. Fits all base estimators to training data
+        2. Generates training prediction matrix
+        3. Computes majority class as fallback prediction
+        4. Initializes distance, kernel, and aggregator components
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Training features of shape (n_samples, n_features).
+
+        y : np.ndarray
+            Target class labels.
 
         Returns
         -------
-        self
+        self : CombineClassifier
+            Fitted classifier instance (returns self).
+
+        Examples
+        --------
+        >>> clf = CombineClassifier(estimators=["svm", "random_forest"])
+        >>> clf.fit(X_train, y_train)
         """
         self.classes_ = np.unique(y)
 
@@ -241,12 +262,34 @@ class CombineClassifier(ABC, SkBaseEstimator):
 
     def predict(self, X):
         """
-        Predict using kernel-weighted consensus aggregation.
+        Predict class labels using kernel-weighted consensus aggregation.
+
+        For each test sample:
+
+        1. Collect all base estimator predictions (prediction matrix)
+        2. Compute distance to training predictions in prediction space
+        3. Apply kernel to convert distances to similarity weights
+        4. Aggregate neighbor training labels using weights
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Test features of shape (n_samples, n_features).
 
         Returns
         -------
         np.ndarray
-            Predicted labels.
+            Predicted class labels of shape (n_samples,).
+
+        Notes
+        -----
+        When no valid neighbors (zero weights) are found for a sample,
+        the method falls back to predicting the global majority class
+        observed during training.
+
+        Examples
+        --------
+        >>> y_pred = clf.predict(X_test)
         """
         X = check_array(X)
 

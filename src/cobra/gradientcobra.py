@@ -82,44 +82,81 @@ from cobra.core.splitters.base import BaseDataSplitter, SplitterFactory
 
 class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
     """
-    Gradient-optimized COBRA regressor.
+    GradientCOBRA regressor with differentiable kernel parameter tuning.
+
+    GradientCOBRA extends the COBRA ensemble by enabling continuous
+    optimization of kernel parameters (for example, bandwidth) using a
+    differentiable objective. It supports both gradient-based optimizers and
+    discrete search strategies for hyperparameter selection.
 
     Parameters
     ----------
-    estimators : list[str | BaseEstimator] | None
-        Base estimators forming the expert pool.
+    estimators : list[str | BaseEstimator] | None, default=None
+        Identifiers or estimator instances forming the expert pool. String
+        identifiers are resolved via ``EstimatorFactory``.
 
-    estimators_params : dict[str, Any] | None
-        Hyperparameters per estimator.
+    estimators_params : dict[str, Any] | None, default=None
+        Mapping from estimator identifier to constructor keyword arguments.
 
-    distance : str
-        Distance metric for prediction space.
+    distance : str, default='euclidean'
+        Distance metric identifier used to compute pairwise distances in the
+        prediction space.
 
-    kernel : str
-        Kernel function for weight computation.
+    distance_params : dict | None, default=None
+        Parameters forwarded to the distance implementation.
 
-    aggregator : str
-        Aggregation strategy for weighted outputs.
+    kernel : str, default='rbf'
+        Kernel identifier used to convert transformed distances to weights.
 
-    loss : str
-        Loss function for optimization.
+    kernel_params : dict | None, default=None
+        Parameters forwarded to the kernel implementation.
 
-    optimizer : str
-        Optimization method for kernel parameters.
+    aggregator : str, default='weighted_mean'
+        Aggregation strategy identifier for combining weighted neighbor
+        predictions.
 
-    opt_method : str
-        Optimization strategy:
-        - "grad" → gradient-based
-        - "search" → grid/search-based
+    aggregator_params : dict | None, default=None
+        Keyword arguments forwarded to the aggregator implementation.
+
+    loss : str, default='mse'
+        Loss identifier used as the optimization objective.
+
+    loss_params : dict | None, default=None
+        Keyword arguments forwarded to the loss implementation.
+
+    optimizer : str, default='gradient_descent'
+        Optimizer identifier used for gradient-based tuning when
+        ``opt_method='grad'``.
+
+    optimizer_params : dict | None, default=None
+        Parameters forwarded to the optimizer implementation.
+
+    opt_method : str, default='grad'
+        High-level optimization mode. ``'grad'`` uses a gradient optimizer
+        (continuous tuning); ``'search'`` uses a grid or random search over
+        a discrete parameter set.
 
     bandwidth_list : np.ndarray | None
-        Search space for kernel bandwidth (if search mode).
+        Optional candidate bandwidths for discrete search optimizers.
 
     norm_constant : float | None
-        Normalization constant for space scaling.
+        Optional normalization constant used by the space normalizer.
 
     random_state : int | None
-        Reproducibility seed.
+        Random seed used by splitters, optimizers and any stochastic
+        components.
+
+    Notes
+    -----
+    - The implementation follows a clear pipeline: estimator training,
+      prediction-matrix construction, normalization, distance/kernel
+      computation, optimizer-driven parameter selection, and aggregation.
+    - New components should be registered via the appropriate factories to
+      integrate with the pipeline seamlessly.
+
+    See Also
+    --------
+    MixCOBRARegressor, CombineClassifier
     """
 
     def __init__(
@@ -353,16 +390,45 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
         y_l : np.ndarray | None = None
     ):
         """
-        Fit GradientCOBRA model.
+        Fit GradientCOBRA model with kernel bandwidth tuning.
+
+        This method trains base estimators and learns the optimal kernel
+        bandwidth (or other adapter parameters) that minimize prediction
+        error on a calibration set.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Training features. Shape: (n_samples, n_features).
+
+        y : np.ndarray
+            Training targets. Shape: (n_samples,).
+
+        X_l : np.ndarray | None, default=None
+            External calibration features. If provided, used for aggregation
+            instead of internal split. Shape: (n_cal_samples, n_features).
+
+        y_l : np.ndarray | None, default=None
+            External calibration targets. Shape: (n_cal_samples,).
+
+        Returns
+        -------
+        self : GradientCOBRA
+            Fitted model instance.
 
         Workflow
         --------
-        1. Split dataset
-        2. Train estimators
-        3. Build prediction space
-        4. Normalize space
-        5. Initialize components
-        6. Optimize parameters
+        1. Split data into training (X_k) and calibration (X_l) subsets
+        2. Train base estimators on X_k
+        3. Generate prediction matrix on X_l
+        4. Normalize prediction space
+        5. Initialize distance, kernel, adapter, and aggregator components
+        6. Tune kernel bandwidth using optimization strategy
+
+        Examples
+        --------
+        >>> model = GradientCOBRA()
+        >>> model.fit(X_train, y_train)
         """
         # split data into train and aggregation sets
         (
@@ -391,12 +457,34 @@ class GradientCOBRA(ABC, SkBaseEstimator, RegressorMixin):
 
     def predict(self, X):
         """
-        Predict using optimized consensus model.
+        Predict target values using fitted GradientCOBRA model.
+
+        For each test sample, this method computes distances in the
+        normalized prediction space, applies the optimized kernel with
+        tuned bandwidth, and aggregates neighbor training targets.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Test features. Shape: (n_samples, n_features).
 
         Returns
         -------
         np.ndarray
-            Predicted regression values.
+            Predicted target values. Shape: (n_samples,).
+
+        Workflow
+        --------
+        1. Generate predictions from all base estimators
+        2. Normalize prediction space
+        3. Compute distances to calibration predictions
+        4. Transform distances using tuned kernel adapter
+        5. Apply kernel function to generate similarity weights
+        6. Aggregate calibration targets using kernel weights
+
+        Examples
+        --------
+        >>> y_pred = model.predict(X_test)
         """
         check_is_fitted(self)
 

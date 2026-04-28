@@ -115,8 +115,14 @@ class BaseEstimator(ABC):
         Returns
         -------
         BaseEstimator
-            Fitted estimator instance.
+            Fitted estimator instance (``self``). Implementations should
+            return ``self`` to remain compatible with scikit-learn style APIs.
 
+        Notes
+        -----
+        - ``x`` is typically an array of shape ``(n_samples, n_features)``.
+        - ``y`` is typically a 1-D array of shape ``(n_samples,)`` or a 2-D
+          array for multi-output estimators.
         Examples
         --------
         >>> model.fit(X_train, y_train)
@@ -135,8 +141,10 @@ class BaseEstimator(ABC):
 
         Returns
         -------
-        array-like
-            Predicted values for each input sample.
+        np.ndarray
+            Predicted values. Expected shape is ``(n_samples,)`` for
+            single-output regressors/classifiers or ``(n_samples, n_outputs)``
+            for multi-output estimators.
 
         Examples
         --------

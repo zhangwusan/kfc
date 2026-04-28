@@ -1,3 +1,38 @@
+"""
+SuperLearner regressor using ensemble consensus and meta-learning.
+
+The SuperLearner algorithm (van der Laan, Polley & Hubbard, 2007)
+combines predictions from heterogeneous base learners by training
+a meta-learner on cross-validated predicted features.
+
+Pipeline overview
+------------------
+Input -> Base Learners -> CV Predictions -> Meta-Learner -> Output
+
+Core design
+-----------
+1. Train diverse base learners (experts)
+2. Generate cross-validated predictions on training data
+3. Train a meta-learner to combine base predictions
+4. Use fitted base + meta learners to generate final predictions
+
+This approach minimizes the risk of meta-learning overfitting by
+using held-out cross-validated predictions.
+
+Key features
+------------
+- Flexible base learner pool selection
+- Hyperparameter tuning via cross-validation
+- Support for additional hand-crafted features
+- Sklearn-compatible fit/predict API
+
+References
+----------
+van der Laan, M., Polley, E., & Hubbard, A. (2007).
+"Super Learner." Statistical Applications in Genetics and Molecular Biology, 6(1).
+https://doi.org/10.2202/1544-6115.1309
+"""
+
 # --------------- Version 1.0.5 -------------------
 # =================================================
 

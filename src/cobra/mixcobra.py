@@ -33,48 +33,88 @@ from cobra.core.splitters.base import BaseDataSplitter, SplitterFactory
 
 class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 	"""
-	MixCOBRARegressor
+	MixCOBRA regressor that learns mixing weights across input/output spaces.
 
-	A consensus-based regression model that learns optimal similarity
-	weights between samples using both input-space and output-space distances.
-
-	Core idea:
-	    - Train multiple base estimators
-	    - Generate prediction matrix
-	    - Compare similarity in feature + prediction space
-	    - Learn mixing weights (alpha, beta)
-	    - Aggregate neighbors using kernel-weighted voting
+	This estimator implements the MixCOBRA pattern: it trains an ensemble of
+	base estimators, constructs a prediction-space representation, computes
+	distances in input and output (prediction) spaces, learns mixing
+	coefficients (alpha, beta) that balance those spaces, and aggregates
+	neighbor targets with a kernel-weighted aggregator.
 
 	Parameters
 	----------
-	estimators : list[str | BaseEstimator], optional
-	    Base models used in ensemble pool.
-	estimators_params : dict[str, Any], optional
-	    Hyperparameters for each estimator.
-	distance : str
-	    Distance metric for similarity computation.
-	kernel : str
-	    Kernel function to transform distances into weights.
-	aggregator : str
-	    Strategy to combine neighbor predictions.
-	loss : str
-	    Loss function used for optimization.
-	optimizer : str
-	    Optimization strategy (gradient or search).
-	alpha_list : np.ndarray, optional
-	    Candidate values for alpha (input-space weight).
-	beta_list : np.ndarray, optional
-	    Candidate values for beta (output-space weight).
-	norm_constant_x : float, optional
-	    Normalization constant for input space.
-	norm_constant_y : float, optional
-	    Normalization constant for output space.
-	opt_method : str
-	    Optimization method ("grad" or "grid/search").
-	one_parameter : bool
-	    If True, only optimize alpha (beta fixed to 0).
-	random_state : int, optional
-	    Random seed.
+	estimators : list[str | BaseEstimator] | None, default=None
+		List of estimator identifiers or estimator instances used as the expert
+		pool. When a string is provided the ``EstimatorFactory`` is used to
+		instantiate the implementation.
+
+	estimators_params : dict[str, Any] | None, default=None
+		Optional mapping of estimator name -> init parameters passed to the
+		corresponding factory when string identifiers are used.
+
+	distance : str, default='euclidean'
+		Identifier for the distance metric used to compute pairwise similarity
+		in feature/prediction spaces (resolved via ``DistanceFactory``).
+
+	distance_params : dict | None, default=None
+		Additional keyword arguments forwarded to the chosen distance class.
+
+	kernel : str, default='rbf'
+		Kernel identifier used to convert distances into weights (resolved via
+		``KernelFactory``).
+
+	kernel_params : dict | None, default=None
+		Keyword arguments forwarded to the kernel implementation.
+
+	aggregator : str, default='weighted_mean'
+		Aggregation strategy identifier used to combine neighbor targets.
+
+	aggregator_params : dict | None, default=None
+		Keyword arguments forwarded to the aggregator implementation.
+
+	loss : str, default='mse'
+		Loss identifier used during hyperparameter optimization.
+
+	loss_params : dict | None, default=None
+		Keyword arguments forwarded to the loss implementation.
+
+	optimizer : str, default='grad'
+		Optimizer identifier (gradient or search based) used to tune mixing
+		parameters; resolved via optimizer factories.
+
+	optimizer_params : dict | None, default=None
+		Parameters forwarded to the optimizer implementation.
+
+	alpha_list, beta_list : np.ndarray | None
+		Optional candidate grids used by grid/search optimizers. Not used for
+		gradient-based optimizers.
+
+	norm_constant_x, norm_constant_y : float | None
+		Optional normalization constants for input (X) and output (Y)
+		spaces. When None, the configured ``SpaceNormalizer`` determines
+		appropriate scaling.
+
+	opt_method : str, default='grad'
+		High-level optimization mode: either ``'grad'`` for gradient-based
+		tuning or ``'search'`` for grid/search strategies.
+
+	one_parameter : bool, default=False
+		If True, only optimize ``alpha`` and keep ``beta`` fixed to zero.
+
+	random_state : int | None
+		PRNG seed for reproducible components (splitters, optimizers, etc.).
+
+	Notes
+	-----
+	- The implementation follows a pipeline of: estimator training,
+	  prediction matrix construction, space normalization, distance/kernel
+	  computation, optimizer-driven parameter selection, and aggregation.
+	- All components are created via factory classes; to extend behaviour,
+	  register new implementations with the appropriate ``*Factory``.
+
+	See Also
+	--------
+	GradientCOBRA, CombineClassifier
 	"""
 	def __init__(
 		self,
@@ -396,19 +436,49 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		pred_features: np.ndarray | None = None
 	):
 		"""
-		Fit MixCOBRA model.
+		Fit MixCOBRA model with hyperparameter optimization.
 
-		Steps:
-		1. Split dataset
-		2. Train base estimators
-		3. Build prediction matrix
-		4. Normalize spaces
-		5. Initialize components
-		6. Optimize hyperparameters
+		This method trains base estimators and learns optimal mixing weights
+		(alpha, beta) that balance input-space and output-space distances
+		for aggregation.
+
+		Parameters
+		----------
+		X : np.ndarray
+			Training features. Shape: (n_samples, n_features).
+
+		y : np.ndarray
+			Training targets. Shape: (n_samples,).
+
+		X_l : np.ndarray | None, default=None
+			External calibration features. If provided, used for aggregation
+			instead of internal split. Shape: (n_cal_samples, n_features).
+
+		y_l : np.ndarray | None, default=None
+			External calibration targets. Shape: (n_cal_samples,).
+
+		pred_features : np.ndarray | None, default=None
+			Pre-computed model predictions to use instead of internal
+			estimator outputs. Useful for integrating external predictions.
 
 		Returns
 		-------
-		self
+		self : MixCOBRARegressor
+			Fitted model instance.
+
+		Workflow
+		--------
+		1. Split data into training (X_k) and calibration (X_l) subsets
+		2. Train base estimators on X_k
+		3. Generate prediction matrix on X_l
+		4. Normalize input and output spaces
+		5. Initialize distance, kernel, adapter, and aggregator components
+		6. Optimize alpha/beta mixing parameters
+
+		Examples
+		--------
+		>>> model = MixCOBRARegressor()
+		>>> model.fit(X_train, y_train)
 		"""
 		
 		(
@@ -445,19 +515,44 @@ class MixCOBRARegressor(ABC, SkBaseEstimator, RegressorMixin):
 		bandwidth: float | None = None
 	) -> np.ndarray:
 		"""
-		Predict target values for input samples.
+		Predict target values using fitted MixCOBRA aggregator.
 
-		Steps:
-		1. Generate estimator predictions
-		2. Normalize spaces
-		3. Compute distance matrices
-		4. Apply kernel weighting
-		5. Aggregate neighbors
+		For each test sample, this method computes distances in both
+		input and output (prediction) spaces, combines them using optimized
+		alpha/beta weights, and aggregates neighbor training targets.
+
+		Parameters
+		----------
+		X : np.ndarray
+			Test features. Shape: (n_samples, n_features).
+
+		pred_X : np.ndarray | None, default=None
+			Pre-computed predictions for test samples (e.g., from external
+			models). If None, predictions are generated using internal
+			estimators.
+
+		alpha, beta, bandwidth : float | None
+			Optional parameter overrides (currently unused; kept for API
+			compatibility).
 
 		Returns
 		-------
 		np.ndarray
-		    Predicted values
+			Predicted target values. Shape: (n_samples,).
+
+		Workflow
+		--------
+		1. Generate or use provided predictions for test samples
+		2. Normalize input and prediction spaces
+		3. Compute distances in both spaces
+		4. Combine distances using learned alpha/beta weights
+		5. Transform combined distance via kernel adapter
+		6. Apply kernel to generate similarity weights
+		7. Aggregate calibration targets using kernel weights
+
+		Examples
+		--------
+		>>> y_pred = model.predict(X_test)
 		"""
 		
 		check_is_fitted(self)

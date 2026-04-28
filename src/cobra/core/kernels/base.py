@@ -146,17 +146,21 @@ class BaseKernel(ABC):
     @abstractmethod
     def __call__(self, *args, **kwargs):
         """
-        Compute kernel transformation.
+        Compute the kernel transformation on distance matrices.
 
         Parameters
         ----------
-        *args, **kwargs
-            Input distance or similarity matrices.
+        distances : array-like
+            One or more distance matrices. Typical shape is
+            ``(n_queries, n_references)`` for a pairwise distance from a
+            set of query samples to reference samples. Some kernels accept a
+            single square distance matrix of shape ``(n_samples, n_samples)``.
 
         Returns
         -------
-        array-like
-            Kernel-weighted similarity output.
+        np.ndarray
+            Kernel-weighted similarity matrix. Output shape matches the
+            primary distance input, typically ``(n_queries, n_references)``.
 
         Raises
         ------

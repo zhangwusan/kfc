@@ -159,18 +159,24 @@ class BaseKernelAdapter(ABC):
         """
         Transform distance matrices before kernel evaluation.
 
-        This method applies adapter-specific logic such as weighting,
-        scaling, or combining multiple distances.
+        The adapter layer combines or rescales one or more distance
+        matrices into a kernel-ready representation. Common usages include
+        linear mixing (alpha*pred + beta*input) or applying a learned
+        transformation to a single distance matrix.
 
         Parameters
         ----------
         *distances : np.ndarray
-            One or more distance matrices produced by the distance module.
+            One or more distance matrices. Each matrix is expected to have
+            shape ``(n_queries, n_references)`` or ``(n_samples, n_samples)``
+            for square pairwise distances.
 
         Returns
         -------
         np.ndarray
-            Transformed distance matrix ready for kernel computation.
+            Transformed distance matrix ready for kernel computation. Shape
+            should align with the primary distance input (typically
+            ``(n_queries, n_references)``).
 
         Raises
         ------
